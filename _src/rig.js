@@ -113,6 +113,33 @@ var BB_RIG = (() => {
   };
 
   // ── 그리기 도구 ──
+  let mix = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t }),
+    // 먼 쪽 팔다리는 조금 어둡게 (입체감)
+    dark = (hex, f) => `#` + [1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * f).toString(16).padStart(2, `0`)).join(``),
+    chain = (g, pts, ws, color, ol = 1.3) => {
+      let body = (ex) => {
+        for (let i = 0; i < pts.length; i++) {
+          let p = pts[i],
+            r = ws[i] / 2 + ex;
+          (g.beginPath(), g.arc(p.x, p.y, Math.max(0.5, r), 0, 7), g.fill());
+          if (!i) continue;
+          let a = pts[i - 1],
+            ra = ws[i - 1] / 2 + ex,
+            dx = p.x - a.x,
+            dy = p.y - a.y,
+            l = Math.hypot(dx, dy) || 1,
+            nx = -dy / l,
+            ny = dx / l;
+          (g.beginPath(),
+            g.moveTo(a.x + nx * ra, a.y + ny * ra),
+            g.lineTo(p.x + nx * r, p.y + ny * r),
+            g.lineTo(p.x - nx * r, p.y - ny * r),
+            g.lineTo(a.x - nx * ra, a.y - ny * ra),
+            g.fill());
+        }
+      };
+      (ol && ((g.fillStyle = `#00000080`), body(ol)), (g.fillStyle = color), body(0));
+    };
   let cap = (g, a, b, w, color, outline = `#0000008c`) => {
     (g.beginPath(), g.moveTo(a.x, a.y), g.lineTo(b.x, b.y));
     ((g.lineCap = `round`), (g.strokeStyle = outline), (g.lineWidth = w + 2.2), g.stroke());
@@ -200,14 +227,20 @@ var BB_RIG = (() => {
         items = [],
         push = (z, fn) => items.push({ z, fn }),
         zOf = (...ks) => ks.reduce((a, b) => a + P[b].z, 0) / ks.length;
-      // 다리
+      // 다리: 엉덩이~발목을 한 덩어리로 (허벅지 → 무릎 → 종아리 볼록 → 발목), 양말·신발은 위에 덧칠
+      let far = (sd) => (P[`f` + sd].z > P[`b` + sd].z ? `f` : `b`), // 카메라에서 먼 쪽
+        fl = far(`Hip`),
+        fa = far(`Sh`);
       for (let sd of [`b`, `f`]) {
-        push(zOf(sd + `Hip`, sd + `Knee`), () => cap(g, P[sd + `Hip`], P[sd + `Knee`], 0.145 * k, style.pants));
-        push(zOf(sd + `Knee`, sd + `Ank`) - 0.01, () => {
-          let mid = { x: (P[sd + `Knee`].x * 0.45 + P[sd + `Ank`].x * 0.55), y: (P[sd + `Knee`].y * 0.45 + P[sd + `Ank`].y * 0.55) };
-          (cap(g, P[sd + `Knee`], mid, 0.115 * k, style.pants), cap(g, mid, P[sd + `Ank`], 0.095 * k, style.socks));
+        let hip = P[sd + `Hip`],
+          kn = P[sd + `Knee`],
+          an = P[sd + `Ank`],
+          sh = sd === fl ? 0.86 : 1;
+        push(zOf(sd + `Hip`, sd + `Knee`, sd + `Ank`), () => {
+          (chain(g, [hip, kn, mix(kn, an, 0.3), an], [0.17 * k, 0.118 * k, 0.124 * k, 0.08 * k], dark(style.pants, sh)),
+            chain(g, [mix(kn, an, 0.55), an], [0.112 * k, 0.082 * k], dark(style.socks, sh), 0),
+            chain(g, [an, P[sd + `Toe`]], [0.085 * k, 0.075 * k], `#161616`));
         });
-        push(zOf(sd + `Ank`, sd + `Toe`) - 0.02, () => cap(g, P[sd + `Ank`], P[sd + `Toe`], 0.09 * k, `#151515`));
       }
       // 몸통 (어깨~골반 사각형) + 등번호
       push(zOf(`fSh`, `bSh`, `fHip`, `bHip`), () => {
@@ -238,15 +271,16 @@ var BB_RIG = (() => {
             g.restore());
         }
       });
-      // 팔 (뒤 팔 → 앞 팔은 깊이로 정렬)
+      // 팔: 어깨~손목 한 덩어리 (언더셔츠), 반소매를 덧입히고 장갑
       for (let sd of [`b`, `f`]) {
-        push(zOf(sd + `Sh`, sd + `Elb`), () => cap(g, P[sd + `Sh`], P[sd + `Elb`], 0.11 * k, style.sleeve));
-        push(zOf(sd + `Elb`, sd + `Hand`), () => {
-          (cap(g, P[sd + `Elb`], P[sd + `Hand`], 0.085 * k, style.skin),
-            g.beginPath(),
-            g.arc(P[sd + `Hand`].x, P[sd + `Hand`].y, Math.max(1.5, (sd === `f` ? style.fGloveR : 0.05) * k), 0, 7),
-            (g.fillStyle = sd === `f` ? style.fGlove : style.glove),
-            g.fill());
+        let s0 = P[sd + `Sh`],
+          el = P[sd + `Elb`],
+          hd = P[sd + `Hand`],
+          sh = sd === fa ? 0.86 : 1;
+        push(zOf(sd + `Sh`, sd + `Elb`, sd + `Hand`), () => {
+          (chain(g, [s0, el, mix(el, hd, 0.35), hd], [0.12 * k, 0.086 * k, 0.092 * k, 0.064 * k], dark(style.under, sh)),
+            chain(g, [s0, mix(s0, el, 0.45)], [0.135 * k, 0.122 * k], dark(style.sleeve, sh)),
+            chain(g, [hd, hd], [2 * Math.max(1.5, (sd === `f` ? style.fGloveR : 0.05) * k), 0], sd === `f` ? style.fGlove : style.glove));
         });
       }
       // 배트 (손잡이 가늘고 배럴 굵게) + 스윙 잔상
@@ -289,7 +323,7 @@ var BB_RIG = (() => {
       push(Math.min(P.head.z, P.neck.z) - 0.25, () => {
         let h = P.head,
           r = style.headR * k;
-        (cap(g, P.neck, h, 0.09 * k, style.skin),
+        (chain(g, [P.neck, h], [0.1 * k, 0.09 * k], style.skin, 0),
           g.beginPath(),
           g.arc(h.x, h.y, r, 0, 7),
           (g.fillStyle = style.helmet),
@@ -308,8 +342,8 @@ var BB_RIG = (() => {
       items.sort((a, b) => b.z - a.z).forEach((it) => it.fn());
     }
 
-    let BAT_STYLE = { jersey: `#f4f5f8`, pants: `#e6e8ee`, socks: `#1b2944`, belt: `#1b2944`, sleeve: `#f4f5f8`, skin: `#d7a77c`, glove: `#222`, fGlove: `#222`, fGloveR: 0.05, helmet: `#13284b`, headR: 0.125, numColor: `#1b2944`, trail: [] },
-      PIT_STYLE = { jersey: `#d9dce2`, pants: `#cfd3da`, socks: `#1b2944`, belt: `#1b2944`, sleeve: `#d9dce2`, skin: `#d7a77c`, glove: `#d7a77c`, fGlove: `#7a4a1f`, fGloveR: 0.09, helmet: `#1b2944`, headR: 0.11, num: null, trail: [] };
+    let BAT_STYLE = { jersey: `#f4f5f8`, pants: `#e6e8ee`, socks: `#1b2944`, belt: `#1b2944`, sleeve: `#f4f5f8`, under: `#1b2944`, skin: `#d7a77c`, glove: `#222`, fGlove: `#222`, fGloveR: 0.05, helmet: `#13284b`, headR: 0.125, numColor: `#1b2944`, trail: [] },
+      PIT_STYLE = { jersey: `#d9dce2`, pants: `#cfd3da`, socks: `#1b2944`, belt: `#1b2944`, sleeve: `#d9dce2`, under: `#1b2944`, skin: `#d7a77c`, glove: `#d7a77c`, fGlove: `#7a4a1f`, fGloveR: 0.09, helmet: `#1b2944`, headR: 0.11, num: null, trail: [] };
 
     let raf = 0,
       visible = !0,

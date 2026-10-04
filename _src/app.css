@@ -18,10 +18,6 @@
 .bv.on{opacity:1;pointer-events:auto;cursor:crosshair}
 .bv-scene{position:absolute;left:0;top:0;display:block}
 
-.bv-pitcher{position:absolute;left:407px;top:198px;width:36px;height:64px}
-.bv-pitcher .bv-parm{transform-box:fill-box;transform-origin:50% 8%;transition:transform .18s ease-in}
-.bv-pitcher.windup .bv-parm{transform:rotate(160deg);transition:transform .9s ease-out}
-.bv-pitcher.windup svg{transform:translateY(-2px) rotate(-4deg);transition:transform .9s ease-out}
 
 .bv-zone{position:absolute;left:377px;top:280px;width:96px;height:116px;border:2px solid #ffffffd9;border-radius:2px;
   background:
@@ -42,18 +38,6 @@
 .bv-spark.on{animation:bvSpark .4s ease-out forwards}
 @keyframes bvSpark{0%{opacity:1;transform:translate(-50%,-50%) scale(.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.6)}}
 
-.bv-batter{position:absolute;left:500px;top:212px;width:220px;height:370px;z-index:6;pointer-events:none}
-.bv-batter > div:first-child svg{display:block;transform-origin:110px 360px;transition:transform .14s ease-out}
-.bv-batter.swing > div:first-child svg{transform:rotate(-5deg) translateX(-8px)}
-/* 배트: 굵은 배럴(18px) → 가는 손잡이 → 노브. 아래쪽 중심이 손 위치(151,100) */
-.bv-bat{position:absolute;left:142px;top:-72px;width:18px;height:174px;transform-origin:50% 100%;transform:rotate(-12deg);
-  background:linear-gradient(90deg,#7d4f24,#d9a463 40%,#e8b878 52%,#a8703a 85%,#7d4f24);
-  clip-path:polygon(18% 0,82% 0,100% 2.5%,100% 38%,70% 78%,66% 95%,82% 97%,82% 100%,18% 100%,18% 97%,34% 95%,30% 78%,0 38%,0 2.5%);
-  filter:drop-shadow(0 0 1px #0009);transition:transform .12s cubic-bezier(.3,.0,.2,1)}
-.bv-num{position:absolute;left:111px;top:132px;transform:translateX(-50%);font:900 46px/1 "Arial Black",Arial,sans-serif;color:#1b2944}
-.bv-batter.R{left:130px;transform:scaleX(-1)}
-.bv-batter.R .bv-num{transform:translateX(-50%) scaleX(-1)}
-.bv-batter.swing .bv-bat{transform:translate(-62px,40px) rotate(-96deg)}
 
 .bv-feedback{position:absolute;left:425px;top:148px;transform:translate(-50%,-50%);z-index:8;white-space:nowrap;pointer-events:none;
   font-size:26px;font-weight:900;letter-spacing:.5px;text-shadow:0 2px 0 #000,0 0 10px #000c;animation:bvPop .35s ease-out}
@@ -61,8 +45,6 @@
 .bv-pitchinfo{position:absolute;left:425px;top:412px;transform:translateX(-50%);z-index:8;white-space:nowrap;pointer-events:none;
   background:#000000b3;border:1px solid #ffffff33;border-radius:999px;padding:4px 14px;font-size:13px;font-weight:700;color:#fff}
 .bb-result-display .bb-out-reason{display:block;margin-top:4px;font-size:24px;font-weight:800;color:#fff}
-.bv-hint{position:absolute;left:425px;bottom:6px;transform:translateX(-50%);z-index:8;white-space:nowrap;pointer-events:none;
-  font-size:11px;color:#ffffffb3;background:#0000008c;border-radius:999px;padding:3px 12px}
 
 /* ── 일시정지 → 메인 화면 ── */
 .bb-btn-home{background-color:#34495e}
@@ -98,7 +80,6 @@
 .bb-halfbreak h2{color:#f1c40f}
 .bb-halfbreak p{margin:2px 0 6px;font-size:17px}
 .bb-halfbreak .bb-halfbreak-extra{color:#e67e22;font-weight:800}
-.bb-halfbreak .bb-halfbreak-tip{font-size:12px;color:#aaa;margin-bottom:14px}
 .bb-end-score{font-size:16px!important;color:#ddd}
 .bb-innings-pick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .bb-innings-pick .bb-btn{padding:12px 0}
@@ -126,3 +107,10 @@
 .bv-canvas{position:absolute;left:0;top:0;width:850px;height:580px;pointer-events:none}
 .bv-canvas-p{z-index:2}
 .bv-canvas-b{z-index:6}
+
+/* How To Play / 메인 메뉴 */
+.bb-menu .bb-btn{padding:12px 16px;font-size:15px;text-align:left}
+.bb-menu{display:flex;flex-direction:column;gap:10px}
+.bb-howto{display:grid;gap:4px;font-size:13px;margin:4px 0 10px}
+.bb-howto div{display:grid;grid-template-columns:76px 1fr;gap:8px;padding:5px 8px;background:#ffffff0d;border-radius:5px}
+.bb-howto b{color:#f1c40f}

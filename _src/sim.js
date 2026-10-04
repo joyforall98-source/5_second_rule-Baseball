@@ -728,15 +728,6 @@ var BB_SIM = (() => {
     return start(bb, st).runToEnd().result();
   }
 
-  // (구버전 호환) 희생플라이 태그업 판정
-  function tagUp(catchM, fromBase, diff) {
-    let c = cfg(diff),
-      d = dist(catchM, BB_BASES[fromBase + 1]),
-      ballT = c.transfer + 0.2 + d / c.thr + (d > 62 ? 0.45 : 0),
-      runT = BB_LEG / c.run + 0.35;
-    return runT + rnd(-0.35, 0.35) < ballT;
-  }
-
-  return { batted, start, play, sample, tagUp, cfg, basePos };
+  return { batted, start, play, sample, cfg, basePos };
 })();
 typeof module !== `undefined` && (module.exports = { BB_SIM, bbFence, BB_FIELD_M, BB_BASES }); // Node 테스트용
