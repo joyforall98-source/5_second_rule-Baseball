@@ -1240,6 +1240,8 @@ function ee({
               }),
             ],
           }),
+          // 공격 팀 타순 (경기 내내 고정)
+          teams[bat] && (0, S.jsx)(LineupCard, { team: teams[bat], current: s }),
           (0, S.jsxs)(`div`, {
             className: `bb-tv-diamond`,
             children: [
@@ -1503,7 +1505,6 @@ function ae({
   half,
   bat,
   halfRuns,
-  batterNumber,
 }) {
   // 메인 화면으로 가기 전 한 번 더 확인 (실수로 눌러 경기가 사라지지 않도록)
   let [confirm, setConfirm] = (0, _.useState)(!1),
@@ -1600,8 +1601,6 @@ function ae({
           ],
         }),
         (0, S.jsx)(LineScore, { teams, innings, inning, half, halfRuns, bat }),
-        (0, S.jsx)(`div`, { className: `bb-pause-hitlog-title`, children: `타순 (경기 내내 고정)` }),
-        ...(teams || []).map((tm, k) => (0, S.jsx)(LineupCard, { team: tm, current: k === bat ? batterNumber : null }, k)),
         (0, S.jsx)(`div`, {
           className: `bb-pause-hitlog-title`,
           children: `타자 기록`,
@@ -1955,7 +1954,6 @@ function ce() {
         half: t.half,
         bat: t.bat,
         halfRuns: t.halfRuns,
-        batterNumber: t.batterNumber,
       }),
       (0, S.jsx)(oe, {
         visible: !t.difficulty && !t.gameOver,

@@ -114,3 +114,8 @@
 .bb-howto{display:grid;gap:4px;font-size:13px;margin:4px 0 10px}
 .bb-howto div{display:grid;grid-template-columns:76px 1fr;gap:8px;padding:5px 8px;background:#ffffff0d;border-radius:5px}
 .bb-howto b{color:#f1c40f}
+
+/* 상황판 안의 타순: 이름 없이 번호 칩만 */
+.bb-hud .bb-lineup{grid-column:1/-1;gap:2px;margin:6px 0 0;flex-wrap:nowrap}
+.bb-hud .bb-lineup-name{display:none}
+.bb-hud .bb-lineup-chip{font-size:10px;padding:1px 3px}
