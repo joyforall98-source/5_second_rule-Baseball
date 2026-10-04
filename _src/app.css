@@ -73,3 +73,56 @@
 .bb-quit-actions{display:flex;gap:10px}
 .bb-quit-actions .bb-btn{flex:1;padding:12px}
 .bb-main-title{font-size:22px;font-weight:900;color:#fff;margin-bottom:12px;letter-spacing:.5px}
+
+/* ── 2인 대결: 점수판 ── */
+.bb-sb2{min-width:130px;padding:8px 12px;text-align:left}
+.bb-sb2 .bb-score-label{text-align:center;margin-bottom:4px}
+.bb-sb2-row{display:flex;justify-content:space-between;gap:14px;font-size:15px;font-weight:800;color:#bbb;line-height:1.5}
+.bb-sb2-row b{color:#fff;font-size:18px}
+.bb-sb2-row.batting{color:#f1c40f}
+/* 이닝별 점수표 */
+.bb-linescore{border-collapse:collapse;margin:10px auto 14px;font-size:13px;background:#ffffff0d;border-radius:6px;overflow:hidden}
+.bb-linescore th,.bb-linescore td{padding:4px 8px;text-align:center;min-width:22px;border-bottom:1px solid #ffffff14}
+.bb-linescore th{color:#95a5a6;font-weight:700}
+.bb-linescore th.ext{color:#e67e22}
+.bb-linescore td.name{text-align:left;font-weight:800;color:#ecf0f1}
+.bb-linescore td.runs{font-weight:900;color:#f1c40f}
+/* 타순표 */
+.bb-lineup{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:4px 0}
+.bb-lineup-name{font-size:12px;font-weight:800;color:#ecf0f1;margin-right:4px;min-width:28px}
+.bb-lineup-chip{font-size:11px;font-weight:700;padding:2px 6px;border-radius:9px;background:#ffffff14;color:#ddd}
+.bb-lineup-chip.L{box-shadow:inset 0 -2px 0 #3498db}
+.bb-lineup-chip.R{box-shadow:inset 0 -2px 0 #e67e22}
+.bb-lineup-chip.now{background:#f1c40f;color:#111}
+/* 공수 교대 */
+.bb-halfbreak h2{color:#f1c40f}
+.bb-halfbreak p{margin:2px 0 6px;font-size:17px}
+.bb-halfbreak .bb-halfbreak-extra{color:#e67e22;font-weight:800}
+.bb-halfbreak .bb-halfbreak-tip{font-size:12px;color:#aaa;margin-bottom:14px}
+.bb-end-score{font-size:16px!important;color:#ddd}
+.bb-innings-pick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.bb-innings-pick .bb-btn{padding:12px 0}
+
+/* ── 주루 지시 패널 (타구 진행 중) ── */
+.bb-runctl{position:absolute;left:16px;bottom:14px;z-index:26;background:#000000d0;border:1px solid #333;border-left:4px solid #e67e22;border-radius:8px;padding:8px 10px;min-width:250px;font-size:12px}
+.bb-runctl-head{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-weight:800;color:#f1c40f}
+.bb-runctl-head span{flex:1}
+.bb-runctl-row{display:flex;align-items:center;gap:6px;padding:3px 0}
+.bb-runctl-row.manual .bb-runctl-name{color:#f1c40f}
+.bb-runctl-name{flex:1;color:#ecf0f1;font-weight:700}
+.bb-runctl button{border:none;border-radius:4px;padding:4px 8px;font-size:11px;font-weight:800;color:#fff;background:#34495e;cursor:pointer}
+.bb-runctl button:hover:not(:disabled){background:#e67e22}
+.bb-runctl button:disabled{opacity:.35;cursor:not-allowed}
+.bb-field .bb-runner.manual{border-color:#fff;box-shadow:0 0 0 2px #f1c40f,0 0 10px #f1c40f}
+
+/* ── 2P 투구 선택 안내 ── */
+.bb-pitchprompt{position:absolute;left:50%;top:150px;transform:translateX(-50%);z-index:24;background:#000000d9;border:1px solid #2980b9;border-radius:8px;padding:10px 16px;font-size:13px;line-height:1.7;color:#ddd;text-align:center;pointer-events:none;white-space:nowrap}
+.bb-pitchprompt-title{color:#5dade2;font-weight:900;font-size:14px;margin-bottom:2px}
+.bb-pitchprompt-state{display:flex;justify-content:center;gap:12px;margin-top:4px;font-weight:800}
+.bb-pitchprompt-state span{padding:1px 10px;border-radius:10px;background:#ffffff14;color:#888}
+.bb-pitchprompt-state span.ok{background:#27ae60;color:#fff}
+
+/* ── 타자·투수 동작 캔버스 (rig.js) ── */
+.bv-canvas{position:absolute;left:0;top:0;width:850px;height:580px;pointer-events:none}
+.bv-canvas-p{z-index:2}
+.bv-canvas-b{z-index:6}

@@ -1,4 +1,4 @@
-"""_src/sim.js + _src/app.js(게임 로직)와 _src/app.css(추가 스타일)를 ../index.html에 다시 합칩니다.
+"""_src/sim.js + rig.js + app.js(게임 로직)와 _src/app.css(추가 스타일)를 ../index-beforefix.html에 다시 합칩니다.
 
 사용법:  python build.py
 index.html 안의 React 런타임은 그대로 두고, 표시(APP_START/APP_END, APP_CSS) 사이만 교체합니다.
@@ -6,10 +6,11 @@ index.html 안의 React 런타임은 그대로 두고, 표시(APP_START/APP_END,
 import pathlib
 
 here = pathlib.Path(__file__).resolve().parent
+# 결과물: 이 폴더의 index.html은 GitHub 주소로 넘기는 안내 페이지이므로 index-beforefix.html에 빌드
 html_path = here.parent / "index.html"
 html = html_path.read_text(encoding="utf-8")
-# sim.js(타구·수비 계산)를 먼저 넣고 app.js(화면·진행)가 그것을 사용
-app = (here / "sim.js").read_text(encoding="utf-8") + "\n" + (here / "app.js").read_text(encoding="utf-8")
+# sim.js(타구·수비 계산), rig.js(타자·투수 동작)를 먼저 넣고 app.js(화면·진행)가 그것을 사용
+app = "\n".join((here / f).read_text(encoding="utf-8") for f in ("sim.js", "rig.js", "app.js"))
 css = (here / "app.css").read_text(encoding="utf-8")
 
 JS_START, JS_END = "/*APP_START*/", "/*APP_END*/"

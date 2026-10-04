@@ -17,6 +17,10 @@ Error generating stack: `+e.message+`
 // ── 타구·수비·주루 시뮬레이션 (화면과 무관한 순수 계산) ──
 // 좌표는 미터. 홈플레이트 (0,0), +y = 중견수 방향, +x = 1루(우측) 방향.
 // 타구 각도 phi: 0 = 중앙, +45 = 우측 파울라인, -45 = 좌측 파울라인 (|phi| > 45 는 파울).
+//
+// 플레이는 "실시간"으로 진행됩니다: BB_SIM.start()가 만든 플레이 객체를 step(dt)으로 조금씩
+// 진행하고, 그사이 command()로 주자에게 진루/귀루를 지시할 수 있습니다.
+// 수비는 매 순간 공을 가진 선수가 가장 잡기 좋은 주자에게 송구합니다.
 var BB_K = 4.4, // 필드 화면 1m = 4.4px (중앙 펜스 120m가 필드 위쪽 끝에 맞도록)
   BB_LEG = 27.43, // 베이스 간 거리 (90ft)
   BB_BASES = [
@@ -27,6 +31,7 @@ var BB_K = 4.4, // 필드 화면 1m = 4.4px (중앙 펜스 120m가 필드 위쪽
     { x: 0, y: 0 },
   ],
   BB_FIELD_M = {
+    pitcher: { x: 0, y: 18.4 },
     "inf-1b": { x: 20, y: 28 },
     "inf-2b": { x: 10, y: 42 },
     "inf-ss": { x: -10, y: 42 },
@@ -38,6 +43,7 @@ var BB_K = 4.4, // 필드 화면 1m = 4.4px (중앙 펜스 120m가 필드 위쪽
   },
   BB_MOUND = { x: 0, y: 18.4 },
   BB_POS = {
+    pitcher: `투수`,
     "inf-1b": `1루수`,
     "inf-2b": `2루수`,
     "inf-ss": `유격수`,
@@ -58,21 +64,29 @@ var BB_K = 4.4, // 필드 화면 1m = 4.4px (중앙 펜스 120m가 필드 위쪽
 var BB_SIM = (() => {
   let R = Math.random,
     rnd = (a, b) => a + R() * (b - a),
+    clamp = (v, a, b) => Math.max(a, Math.min(b, v)),
     dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y),
     lerp = (a, b, f) => ({ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f }),
     at = (phi, s) => ({
       x: Math.sin((phi * Math.PI) / 180) * s,
       y: Math.cos((phi * Math.PI) / 180) * s,
     }),
-    IF = [`inf-1b`, `inf-2b`, `inf-ss`, `inf-3b`],
+    IF = [`inf-1b`, `inf-2b`, `inf-ss`, `inf-3b`, `pitcher`], // 투수도 내야수처럼 수비
     OF = [`out-lf`, `out-cf`, `out-rf`],
     HIT = [``, `안타`, `2루타`, `3루타`, `그라운드 홈런`],
     HR = [``, `솔로 홈런`, `투런 홈런`, `스리런 홈런`, `만루 홈런`],
-    // 난이도별 수비/주루 능력. EASY는 송구가 느리고(22m/s) 수비 반응이 늦음
+    KIND_OUT = { fly: `뜬공`, line: `직선타`, pop: `팝플라이`, ground: `땅볼` },
+    // 난이도별 수비 능력. EASY는 송구가 느리고(21m/s) 수비 반응이 늦음. 주자 속도(run)는 같음
     cfg = (diff) =>
       diff === `HARD`
         ? { thr: 29, ofSpd: 8.0, ifSpd: 6.4, react: 0.3, run: 7.3, flyErr: 0.015, gbErr: 0.02, transfer: 0.5 }
-        : { thr: 21, ofSpd: 7.4, ifSpd: 6.0, react: 0.4, run: 7.3, flyErr: 0.03, gbErr: 0.04, transfer: 0.65 };
+        : { thr: 21, ofSpd: 7.4, ifSpd: 6.0, react: 0.4, run: 7.3, flyErr: 0.03, gbErr: 0.04, transfer: 0.65 },
+    // 베이스 경로 위치 s(0=홈, 1=1루 … 4=홈) → 좌표
+    basePos = (s) => {
+      s = clamp(s, 0, 4);
+      let i = Math.min(3, Math.floor(s));
+      return lerp(BB_BASES[i], BB_BASES[i + 1], s - i);
+    };
 
   // 스윙 결과(q: 타구 질 0~1, phi: 방향, foul) → 타구
   function batted(q, phi, foul) {
@@ -113,56 +127,93 @@ var BB_SIM = (() => {
     return tr[tr.length - 1];
   }
 
-  function play(bb, st) {
+  // ────────────────────────────────────────────────────────────────
+  // 플레이 시작. st = { bases:[1루,2루,3루], outs, diff }
+  function start(bb, st) {
     let c = cfg(st.diff),
       bases = st.bases,
-      res = {
+      P = {
+        t: 0,
+        done: !1,
         bb,
-        ball: [],
-        fielders: {},
-        runners: {},
-        hideAt: {},
-        outsAdded: 0,
-        runs: 0,
-        newBases: [...bases],
+        st,
+        c,
+        outs: [], // { id, base, t, force, by }
+        runs: [], // { id, t }
+        error: !1,
+        wallBall: !1,
+        caught: null, // { key, p, t }
+        homeRun: !1,
         foul: !!bb.foul,
+        foulOut: !1,
         distance: null,
-        dur: 1,
-      },
-      fpos = (k) => BB_FIELD_M[k],
-      spd = (k) => (k.startsWith(`out`) ? c.ofSpd : c.ifSpd),
-      need = (k, p, slack) => c.react + Math.max(0, dist(fpos(k), p) - slack) / spd(k),
-      // 수비수 이동: 반응시간 후 출발해 tArrive에 도착
-      move = (k, to, tArrive) => {
-        let f = fpos(k),
-          t0 = Math.min(c.react, Math.max(0, tArrive - 0.05));
-        res.fielders[k] = [
-          [0, f.x, f.y],
-          [t0, f.x, f.y],
-          [Math.max(t0 + 0.05, tArrive), to.x, to.y],
-        ];
-      },
+        throws: 0,
+        possessed: !1,
+        landed: !1,
+        landT: 1e9,
+        fixedEnd: null, // 홈런·파울은 정해진 시각에 끝남
+        f: {}, // 수비수 { x, y, goal, startAt, spd }
+        r: [], // 주자 (앞 주자부터 순서대로, 마지막이 타자)
+        ball: { mode: `track`, track: [], x: 0, y: 0, h: 1 },
+        holder: null,
+        holderBase: null,
+        readyAt: 0,
+        cover: { 1: `inf-1b`, 2: `inf-ss`, 3: `inf-3b`, 4: `catcher` },
+        ev: null,
+      };
+    for (let k in BB_FIELD_M) {
+      let m = BB_FIELD_M[k];
+      P.f[k] = {
+        x: m.x,
+        y: m.y,
+        goal: null,
+        startAt: c.react + (k === `pitcher` ? 0.2 : 0), // 투수는 투구 동작 직후라 반응이 조금 늦음
+        spd: k.startsWith(`out`) ? c.ofSpd : c.ifSpd,
+      };
+    }
+    let mk = (id, from) => ({
+      id,
+      from,
+      touched: from, // 마지막으로 정상적으로 밟은 베이스
+      s: from, // 베이스 경로 위치
+      target: from,
+      state: `safe`, // safe | run | wait | out | scored
+      delay: 0,
+      manual: !1, // 플레이어가 지시하면 AI가 더 이상 바꾸지 않음
+      forced: !1,
+      tagIntent: !1,
+      retouch: !1,
+      margin: rnd(0, 0.8), // 주자 성향: 작을수록 과감한 주루
+      holdS: from,
+      outT: null,
+      scoredT: null,
+    });
+    for (let b of [3, 2, 1]) bases[b - 1] && P.r.push(mk(`runner-${b}`, b));
+    let bat = mk(`runner-t`, 0);
+    (P.r.push(bat), (P.bat = bat));
+
+    let spd = (k) => P.f[k].spd,
+      need = (k, p, slack) => P.f[k].startAt + Math.max(0, dist(BB_FIELD_M[k], p) - slack) / spd(k),
+      track = P.ball.track,
       arc = (from, to, t0, t1, H, h0 = 1, h1 = 0) => {
         let n = Math.max(2, Math.ceil((t1 - t0) / 0.08));
         for (let i = 0; i <= n; i++) {
           let u = i / n,
             p = lerp(from, to, u);
-          res.ball.push([t0 + (t1 - t0) * u, p.x, p.y, h0 * (1 - u) + h1 * u + 4 * H * u * (1 - u)]);
+          track.push([t0 + (t1 - t0) * u, p.x, p.y, h0 * (1 - u) + h1 * u + 4 * H * u * (1 - u)]);
         }
       },
-      roll = (pathFn, t0, t1) => {
+      roll = (fn, t0, t1) => {
         for (let t = t0; t < t1; t += 0.08) {
-          let p = pathFn(t);
-          res.ball.push([t, p.x, p.y, 0]);
+          let p = fn(t);
+          track.push([t, p.x, p.y, 0]);
         }
-        let p = pathFn(t1);
-        res.ball.push([t1, p.x, p.y, 0]);
+        let p = fn(t1);
+        track.push([t1, p.x, p.y, 0]);
       },
-      throwTo = (from, to, t0, t1) => res.ball.push([t0, from.x, from.y, 1.5], [t1, to.x, to.y, 1.5]),
-      // 경로를 따라 가장 먼저 공을 처리할 수 있는 수비수 (공이 지나가는 지점에 먼저 도착)
-      intercept = (keys, pathFn, t0, t1, slack) => {
+      intercept = (keys, fn, t0, t1, slack) => {
         for (let t = t0; t <= t1; t += 0.05) {
-          let p = pathFn(t),
+          let p = fn(t),
             best = null;
           for (let k of keys) {
             let n = need(k, p, slack);
@@ -172,122 +223,77 @@ var BB_SIM = (() => {
         }
         return null;
       },
-      // 끝까지 못 잡으면(드묾) 가장 가까운 외야수가 마지막 지점에서 처리
-      interceptOr = (keys, pathFn, t0, t1, slack) =>
-        intercept(keys, pathFn, t0, t1, slack) ||
+      interceptOr = (keys, fn, t0, t1, slack) =>
+        intercept(keys, fn, t0, t1, slack) ||
         (() => {
-          let p = pathFn(t1),
-            k = keys.reduce((a, b) => (dist(fpos(a), p) < dist(fpos(b), p) ? a : b));
+          let p = fn(t1),
+            k = keys.reduce((a, b) => (dist(BB_FIELD_M[a], p) < dist(BB_FIELD_M[b], p) ? a : b));
           return { key: k, t: Math.max(t1, need(k, p, 1)), p, n: need(k, p, 1) };
-        })(),
-      runnerList = () => {
-        let l = [];
-        for (let b of [3, 2, 1]) bases[b - 1] && l.push({ id: `runner-${b}`, from: b });
-        return (l.push({ id: `runner-t`, from: 0 }), l);
-      },
-      forced = (b) => (b === 0 ? !0 : b === 1 ? !0 : b === 2 ? bases[0] : bases[0] && bases[1]),
-      batterFirst = 0.55 + BB_LEG / c.run,
-      leadFirst = BB_LEG / c.run - 0.15,
-      leg = BB_LEG / (c.run * 1.12) + 0.15, // 가속이 붙은 뒤의 한 베이스 (약 3.5초)
-      arrival = (r, k, start) => {
-        if (k <= r.from) return start;
-        let t = r.from === 0 ? batterFirst : start + leadFirst;
-        return t + (k - r.from - 1) * leg;
-      },
-      runTrack = (r, start, target, outT) => {
-        let b0 = BB_BASES[r.from],
-          tr = [
-            [0, b0.x, b0.y],
-            [r.from === 0 ? 0 : start, b0.x, b0.y],
-          ];
-        for (let k = r.from + 1; k <= target; k++) {
-          let b = BB_BASES[k];
-          tr.push([arrival(r, k, start), b.x, b.y]);
-        }
-        if (outT != null && target > r.from) {
-          let p = lerp(BB_BASES[target - 1], BB_BASES[target], 0.85);
-          (tr.pop(), tr.push([outT, p.x, p.y]), (res.hideAt[r.id] = outT + 0.7));
-        }
-        res.runners[r.id] = tr;
-      },
-      cover = (base, key) =>
-        base === 1
-          ? key === `inf-1b` ? `inf-2b` : `inf-1b`
-          : base === 2
-            ? key === `inf-ss` || key === `inf-3b` ? `inf-2b` : `inf-ss`
-            : base === 3
-              ? key === `inf-3b` ? `inf-ss` : `inf-3b`
-              : `catcher`,
-      coverMove = (base, key, tBy) => {
-        let ck = cover(base, key);
-        ck !== key && move(ck, BB_BASES[base], Math.max(0.6, tBy - 0.3));
-      };
+        })();
 
     // ── 파울 ──
     if (bb.foul) {
       if (bb.kind === `ground`) {
         let L = at(bb.phi, Math.min(35, bb.v0 * 1.2));
-        return (roll((t) => lerp({ x: 0, y: 0 }, L, t / 1.2), 0, 1.2), (res.dur = 1.6), (res.label = `파울`), res);
+        return (roll((t) => lerp({ x: 0, y: 0 }, L, t / 1.2), 0, 1.2), (P.fixedEnd = 1.6), wrap(P));
       }
       let L = at(bb.phi, bb.D),
         H = (9.8 * bb.T ** 2) / 8,
-        lateral = bb.D * Math.sin(((Math.abs(bb.phi) - 45) * Math.PI) / 180), // 파울라인에서 벗어난 거리
+        lateral = bb.D * Math.sin(((Math.abs(bb.phi) - 45) * Math.PI) / 180),
         best = null;
       if (lateral < 16 && bb.D < 75)
-        for (let k of [`catcher`, `inf-1b`, `inf-3b`, `out-lf`, `out-rf`]) {
+        for (let k of [`catcher`, `inf-1b`, `inf-3b`, `pitcher`, `out-lf`, `out-rf`]) {
           let n = need(k, L, 1.5);
           n <= bb.T + 0.1 && (!best || n < best.n) && (best = { k, n });
         }
       if (best && R() > c.flyErr) {
-        (arc({ x: 0, y: 0 }, L, 0, bb.T, H, 1, 2), move(best.k, L, Math.min(best.n, bb.T)));
-        let why = `${BB_POS[best.k]} 파울플라이`;
-        return Object.assign(res, {
-          outsAdded: 1,
-          foulOut: !0,
-          label: why,
-          display: bbOut(why),
-          status: `${BB_POS[best.k]}가 파울 지역에서 잡아냄`,
-          dur: bb.T + 0.8,
-        });
+        (arc({ x: 0, y: 0 }, L, 0, bb.T, H, 1, 2), (P.f[best.k].goal = L), (P.foulOut = best.k));
+        return ((P.fixedEnd = bb.T + 0.8), wrap(P));
       }
-      return (arc({ x: 0, y: 0 }, L, 0, bb.T, H), (res.dur = Math.min(bb.T, 2.5) + 0.4), (res.label = `파울`), res);
+      return (arc({ x: 0, y: 0 }, L, 0, bb.T, H), (P.fixedEnd = Math.min(bb.T, 2.5) + 0.4), wrap(P));
     }
 
+    // ── 페어 타구: 누가 언제 어디서 공을 잡는지는 주자와 무관하게 먼저 계산 ──
     let fence = bbFence(bb.phi),
-      hit = null; // { key, t, p (처리 지점), runStart, error }
-
+      ev = null;
     if (bb.kind === `ground`) {
-      // ── 땅볼: 내야수가 막으면 내야 플레이, 빠지면 외야로 굴러간 안타 ──
       let s = (t) => Math.min(fence - 1.5, bb.v0 * 4 * (1 - Math.exp(-t / 4))),
         g = (t) => at(bb.phi, s(t)),
         tPast = 0.15;
       while (s(tPast) < 50 && tPast < 6) tPast += 0.05;
       let f = intercept(IF, g, 0.15, tPast, 1.0);
-      if (f) return infieldPlay(f, g);
-      let o = interceptOr(OF, g, tPast, 10, 1.0);
-      (roll(g, 0, o.t), (res.distance = Math.round(s(o.t))), (hit = { key: o.key, t: o.t, p: o.p, runStart: 0.1 }));
-      move(o.key, o.p, o.n);
+      if (f) {
+        let err = R() < c.gbErr;
+        ev = { key: f.key, t: f.t, p: f.p, infield: !0, error: err, ready: f.t + c.transfer + (err ? 1.4 : 0) };
+      } else {
+        let o = interceptOr(OF, g, tPast, 10, 1.0);
+        ev = { key: o.key, t: o.t, p: o.p, ready: o.t + c.transfer + 0.15 };
+      }
+      (roll(g, 0, ev.t), (P.distance = Math.round(dist(ev.p, { x: 0, y: 0 }))));
     } else {
-      // ── 뜬공 / 라이너 / 팝업 ──
       let L = at(bb.phi, bb.D),
         H = (9.8 * bb.T ** 2) / 8;
-      res.distance = Math.round(bb.D);
+      P.distance = Math.round(bb.D);
       if (bb.kind !== `pop` && bb.D >= fence) {
         let f = fence / bb.D,
           hWall = 1 - f + 4 * H * f * (1 - f);
-        if (hWall >= BB_WALL_H) return homeRun(L, H);
-        // 펜스 직격: 펜스에 맞고 튀어나옴
+        if (hWall >= BB_WALL_H) {
+          // 홈런: 모든 주자가 홈까지 (수비 없음)
+          (arc({ x: 0, y: 0 }, L, 0, bb.T, H), (P.homeRun = !0), (P.fixedEnd = bb.T + 1.4));
+          for (let r of P.r) ((r.state = `run`), (r.target = 4), (r.delay = 0.3), (r.manual = !0), (r.trot = !0));
+          return wrap(P);
+        }
+        // 펜스 직격: 맞고 튀어나온 공을 외야수가 처리
         let tw = bb.T * f,
           W = at(bb.phi, fence - 0.5),
           rest = (t) => at(bb.phi, fence - 0.5 - 6 * (1 - Math.exp(-(t - tw) / 0.4)));
         arc({ x: 0, y: 0 }, W, 0, tw, H, 1, hWall);
         let o = interceptOr(OF, (t) => (t < tw ? W : rest(t)), tw, tw + 8, 1.0);
-        (roll(rest, tw, o.t), move(o.key, o.p, o.n));
-        ((res.wallBall = !0),
-          (hit = { key: o.key, t: o.t, p: o.p, runStart: st.outs === 2 ? 0.1 : Math.max(0.3, tw - 1.2) }));
+        (roll(rest, tw, o.t), (P.wallBall = !0), (P.landT = tw));
+        ev = { key: o.key, t: o.t, p: o.p, ready: o.t + c.transfer + 0.15 };
       } else {
-        // 잡을 수 있는가? (공이 떨어지기 전에 도착)
-        let keys = bb.kind === `pop` ? [...IF, `catcher`, ...OF] : [...OF, ...IF],
+        // 팝업은 투수 대신 야수·포수가 잡음
+        let keys = bb.kind === `pop` ? [...IF.filter((k) => k !== `pitcher`), `catcher`, ...OF] : [...OF, ...IF],
           slack = bb.kind === `line` ? 1.0 : 1.6,
           best = null;
         for (let k of keys) {
@@ -295,49 +301,387 @@ var BB_SIM = (() => {
           n <= bb.T + (bb.kind === `line` ? 0 : 0.1) && (!best || n < best.n) && (best = { k, n });
         }
         if (best && R() > c.flyErr) {
-          (arc({ x: 0, y: 0 }, L, 0, bb.T, H, 1, 2), move(best.k, L, Math.min(best.n, bb.T)));
-          let why = `${BB_POS[best.k]} ${bb.kind === `line` ? `직선타` : bb.kind === `pop` ? `팝플라이` : `뜬공`}`;
-          for (let r of runnerList()) r.from && runTrack(r, 0, r.from);
-          return Object.assign(res, {
-            outsAdded: 1,
-            caught: { key: best.k, p: L },
-            label: why,
-            display: bbOut(why),
-            status: `${BB_POS[best.k]}가 타구를 잡아냄`,
-            dur: bb.T + 0.8,
-          });
+          arc({ x: 0, y: 0 }, L, 0, bb.T, H, 1, 2);
+          ev = { key: best.k, t: bb.T, p: L, catch: !0, ready: bb.T + c.transfer + 0.1 };
+        } else {
+          let err = !!best,
+            rl = bb.kind === `line` ? rnd(12, 28) : bb.kind === `pop` ? rnd(1, 4) : rnd(5, 14),
+            end = Math.min(bb.D + rl, fence - 1.5),
+            rest = (t) => at(bb.phi, bb.D + (end - bb.D) * (1 - Math.exp(-(t - bb.T) / 0.6)));
+          arc({ x: 0, y: 0 }, L, 0, bb.T, H);
+          let o = err
+            ? { key: best.k, t: bb.T + 0.9, p: L }
+            : interceptOr([...OF, ...IF], (t) => (t < bb.T ? L : rest(t)), bb.T, bb.T + 8, 1.0);
+          (roll(err ? () => L : rest, bb.T, o.t), (P.landT = bb.T));
+          ev = { key: o.key, t: o.t, p: o.p, error: err, ready: o.t + c.transfer + 0.15 };
         }
-        // 떨어진 공: 굴러간 뒤 수비수가 처리
-        let err = !!best,
-          rl = bb.kind === `line` ? rnd(12, 28) : bb.kind === `pop` ? rnd(1, 4) : rnd(5, 14), // 굴러가는 거리
-          end = Math.min(bb.D + rl, fence - 1.5),
-          rest = (t) => at(bb.phi, bb.D + (end - bb.D) * (1 - Math.exp(-(t - bb.T) / 0.6)));
-        arc({ x: 0, y: 0 }, L, 0, bb.T, H);
-        let o = err
-          ? { key: best.k, t: bb.T + 0.9, p: L, n: best.n }
-          : interceptOr([...OF, ...IF], (t) => (t < bb.T ? L : rest(t)), bb.T, bb.T + 8, 1.0);
-        (roll(err ? () => L : rest, bb.T, o.t), move(o.key, o.p, Math.min(o.n, o.t)));
-        hit = {
-          key: o.key,
-          t: o.t,
-          p: o.p,
-          error: err,
-          runStart: st.outs === 2 || bb.kind === `line` ? 0.25 : Math.max(0.3, bb.T - 1.2),
-        };
+      }
+      ev.catch && (P.landT = bb.T);
+    }
+    P.ev = ev;
+
+    // ── 수비 배치: 처리할 선수는 공으로, 나머지는 베이스 커버 ──
+    P.f[ev.key].goal = ev.p;
+    let infieldPlay = bb.kind === `ground` && !!ev.infield;
+    ((P.cover[1] = ev.key === `inf-1b` ? `pitcher` : `inf-1b`), // 1루수가 공을 잡으면 투수가 1루 커버
+      (P.cover[2] = ev.key === `inf-ss` || ev.key === `inf-3b` || (!infieldPlay && bb.phi < 0) ? `inf-2b` : `inf-ss`),
+      ev.key === P.cover[2] && (P.cover[2] = P.cover[2] === `inf-ss` ? `inf-2b` : `inf-ss`),
+      (P.cover[3] = ev.key === `inf-3b` ? (P.cover[2] === `inf-ss` ? `pitcher` : `inf-ss`) : `inf-3b`),
+      (P.cover[4] = ev.key === `catcher` ? `pitcher` : `catcher`));
+    for (let b = 1; b <= 4; b++) {
+      let k = P.cover[b];
+      k !== ev.key && (P.f[k].goal = { ...BB_BASES[b] });
+    }
+    for (let k of OF)
+      if (k !== ev.key) {
+        let f = P.f[k];
+        f.goal = lerp(f, ev.p, 0.3); // 다른 외야수는 백업
+      }
+
+    // ── 주자 출발 ──
+    let two = st.outs === 2;
+    ((bat.state = `run`), (bat.target = 1), (bat.delay = 0.55), (bat.forced = !0));
+    for (let r of P.r) {
+      if (r === bat) continue;
+      r.forced = r.from === 1 ? !0 : r.from === 2 ? bases[0] : bases[0] && bases[1];
+      if (two) {
+        // 2아웃: 타격과 동시에 출발
+        ((r.state = `run`), (r.delay = 0.1), (r.s = r.from + 0.06), (r.target = r.from + 1));
+      } else if (bb.kind === `ground`) {
+        if (r.forced) ((r.state = `run`), (r.delay = 0.1), (r.target = r.from + 1));
+        else if (r.from === 2 && bb.phi > 8) ((r.state = `run`), (r.delay = 0.1), (r.target = 3));
+        else if (r.from === 3 && (ev.key === `inf-1b` || ev.key === `inf-2b`)) ((r.state = `run`), (r.delay = 0.1), (r.target = 4));
+      } else {
+        // 뜬공·라이너: 리드한 채로 타구를 지켜봄
+        ((r.state = `wait`),
+          (r.holdS = r.from + (bb.kind === `pop` ? 0.1 : bb.kind === `line` ? 0.06 : clamp(0.12 + (bb.D || 0) / 400, 0.12, 0.42))));
       }
     }
-    return advance(hit);
+    return wrap(P);
+  }
 
-    function homeRun(L, H) {
-      arc({ x: 0, y: 0 }, L, 0, bb.T, H);
-      let n = bases.filter(Boolean).length + 1;
-      for (let r of runnerList()) {
-        let tr = [[0, BB_BASES[r.from].x, BB_BASES[r.from].y]];
-        for (let k = r.from + 1; k <= 4; k++) tr.push([0.4 + (k - r.from) * 2.2, BB_BASES[k].x, BB_BASES[k].y]);
-        res.runners[r.id] = tr;
+  // ────────────────────────────────────────────────────────────────
+  // 플레이 객체에 진행/명령/결과 함수 부착
+  function wrap(P) {
+    let c = P.c,
+      bat = P.bat,
+      live = (r) => r.state !== `out` && r.state !== `scored`,
+      speed = (r) => (r.trot ? 6 : c.run * (r.touched >= 1 || r.from > 0 ? 1.08 : 1)) / BB_LEG, // 베이스/초
+      thrT = (p, k) => {
+        let d = dist(p, BB_BASES[k]);
+        return d / c.thr + (d > 62 ? 0.45 : 0); // 62m 넘으면 중계
+      },
+      // 지금부터 공이 베이스 k에 도착하기까지 걸리는 시간 (주자 AI의 판단 근거)
+      ballTimeTo = (k) => {
+        let b = P.ball;
+        if (b.mode === `track`) return Math.max(P.ev ? P.ev.ready - P.t : 9, 0) + (P.ev ? thrT(P.ev.p, k) : 9);
+        if (b.mode === `held`) return P.holderBase === k ? 0 : Math.max(0, P.readyAt - P.t) + thrT(P.f[P.holder], k);
+        let rem = Math.max(0, b.t1 - P.t);
+        return b.toBase === k ? rem : rem + 0.45 + thrT(BB_BASES[b.toBase], k);
+      },
+      runnerTime = (r, k) => r.delay + (Math.abs(k - r.s) * 1) / speed(r) + (Math.sign(k - r.s) !== Math.sign(r.target - r.s) && r.state === `run` ? 0.3 : 0),
+      idx = (r) => P.r.indexOf(r),
+      leadOf = (r) => {
+        for (let i = idx(r) - 1; i >= 0; i--) if (live(P.r[i])) return P.r[i];
+        return null;
+      },
+      trailOf = (r) => {
+        for (let i = idx(r) + 1; i < P.r.length; i++) if (live(P.r[i])) return P.r[i];
+        return null;
+      },
+      limitOf = (r) => {
+        let l = leadOf(r);
+        return l ? (l.target >= 4 ? 4 : l.target - 1) : 4;
+      },
+      minOf = (r) => (r === bat ? 1 : r.forced ? r.from + 1 : r.touched),
+      setTarget = (r, k) => {
+        if (k === r.target && r.state === `run`) return;
+        let wasDir = Math.sign(r.target - r.s),
+          dir = Math.sign(k - r.s);
+        ((r.target = k),
+          dir === 0 ? r.state !== `wait` && (r.state = `safe`) : ((r.state = `run`), wasDir && dir !== wasDir && (r.delay = Math.max(r.delay, 0.25))));
+      },
+      // 주자 AI: 공보다 먼저 닿을 수 있는 만큼 진루 (플레이어가 지시한 주자는 건드리지 않음)
+      decide = (r) => {
+        if (r.manual || !live(r) || r.state === `wait` || r.retouch || P.done) return;
+        let k = Math.max(r.touched, Math.floor(r.s + 1e-6)),
+          lim = limitOf(r),
+          minB = Math.min(minOf(r), lim);
+        k = Math.min(k, lim);
+        while (k + 1 <= lim) {
+          if (k + 1 <= minB || runnerTime(r, k + 1) < ballTimeTo(k + 1) - r.margin) k++;
+          else break;
+        }
+        (k = Math.max(k, Math.min(minB, lim))), setTarget(r, k);
+      },
+      finish = () => {
+        P.done || ((P.done = !0), (P.endT = P.t));
+      },
+      isForce = (r, k) => (r === bat && k === 1) || (r.forced && k === r.from + 1) || (r.retouch && k === r.from),
+      out = (r, k, force, by) => {
+        if (!live(r)) return;
+        ((r.state = `out`), (r.outT = P.t), P.outs.push({ id: r.id, base: k, t: P.t, force, by }));
+        // 뒤 주자가 아웃되면 앞 주자의 포스 상황이 풀림
+        for (let i = 0; i < idx(r); i++) P.r[i].forced = !1;
+        P.st.outs + P.outs.length >= 3 && finish();
+      },
+      throwTo = (k) => {
+        let h = P.f[P.holder],
+          from = { x: h.x, y: h.y },
+          to = BB_BASES[k],
+          d = dist(from, to),
+          tt = d < 7 ? d / c.ifSpd + 0.1 : thrT(from, k), // 가까우면 직접 들고 뛰어감
+          rec = P.cover[k] === P.holder ? P.holder : P.cover[k];
+        ((P.ball = { mode: `thrown`, from, to, t0: P.t, t1: P.t + tt, toBase: k, receiver: rec, by: P.holder, x: from.x, y: from.y, h: 1.5 }),
+          (P.holderBase = null),
+          P.throws++,
+          rec !== P.holder && (P.f[rec].goal = { ...to }));
+        if (rec === P.holder) P.f[P.holder].goal = { ...to };
+        // 송구가 다른 곳으로 가면 그 틈에 진루할 수 있는지 다시 판단
+        for (let r of P.r) live(r) && r.state === `safe` && decide(r);
+      },
+      // 수비 판단: 공을 가진 선수가 아웃시킬 수 있는 주자에게 송구
+      defense = () => {
+        if (P.throws >= 6) return !1;
+        let h = P.f[P.holder],
+          best = null;
+        for (let r of P.r) {
+          if (!live(r) || r.delay > 0.5) continue;
+          let k = r.state === `run` ? r.target : null;
+          if (k == null || P.holderBase === k || k < 1) continue;
+          let d = dist(h, BB_BASES[k]),
+            tt = Math.min(d < 7 ? d / c.ifSpd + 0.1 : 99, thrT(h, k)),
+            rt = runnerTime(r, k);
+          if (tt + 0.05 < rt) {
+            // 2아웃이면 가장 확실한 아웃, 아니면 앞선 주자(실점 방지) 우선
+            let twoOut = P.st.outs + P.outs.length === 2,
+              score = (twoOut ? 0 : k * 10) + (isForce(r, k) ? 5 : 0) + (rt - tt) * (twoOut ? 10 : 1);
+            (!best || score > best.score) && (best = { k, score });
+          }
+        }
+        if (best) return (throwTo(best.k), !0);
+        // 잡을 수 없으면: 달리는 주자가 더 못 가도록 맨 뒤 주자의 다음 베이스로
+        let moving = P.r.filter((r) => live(r) && r.state === `run` && r.target > r.s);
+        if (moving.length) {
+          let kc = Math.min(4, Math.min(...moving.map((r) => r.target)) + 1);
+          if (kc !== P.holderBase) return (throwTo(kc), !0);
+          return !1;
+        }
+        return !1;
+      },
+      possess = () => {
+        let ev = P.ev;
+        ((P.possessed = !0), (P.ball = { mode: `held`, x: ev.p.x, y: ev.p.y, h: 1.2 }), (P.holder = ev.key), (P.holderBase = null), (P.readyAt = ev.ready));
+        ev.error && (P.error = !0);
+        if (ev.catch) {
+          P.caught = { key: ev.key, p: ev.p, t: P.t };
+          out(bat, 0, !0, ev.key); // 뜬공 아웃 (이때 들어온 득점은 인정 안 됨 → force 취급)
+          if (P.done) return;
+          for (let r of P.r) {
+            if (!live(r)) continue;
+            // 잡혔으면 원래 베이스로 돌아가 다시 밟아야 함 (태그업)
+            ((r.touched = r.from), (r.forced = !1));
+            if (r.s > r.from + 1e-6) ((r.retouch = !0), (r.target = r.from), (r.state = `run`), (r.delay = Math.max(r.delay, 0.2)));
+            else ((r.s = r.from), (r.state = `safe`), (r.target = r.from));
+            // AI 태그업: 잡은 위치에서 다음 베이스까지 송구보다 빠르면 출발
+            if (!r.manual && r.from < 4 && P.st.outs + P.outs.length < 3) {
+              let runT = (r.s - r.from) / speed(r) + 1 / speed(r) + 0.35,
+                ballT = Math.max(0, ev.ready - P.t) + thrT(ev.p, r.from + 1);
+              runT < ballT - r.margin && (r.tagIntent = !0);
+            }
+            !r.retouch && r.tagIntent && ((r.tagIntent = !1), setTarget(r, r.from + 1), (r.delay = 0.25));
+          }
+        }
+      },
+      // 송구가 베이스 k에 도착
+      arrive = () => {
+        let b = P.ball,
+          k = b.toBase,
+          rec = P.f[b.receiver];
+        ((rec.x = b.to.x), (rec.y = b.to.y), (rec.goal = null));
+        ((P.ball = { mode: `held`, x: b.to.x, y: b.to.y, h: 1.2 }), (P.holder = b.receiver), (P.holderBase = k), (P.readyAt = P.t + 0.45));
+        P.assistBy = b.by; // 이 베이스에서 나오는 아웃은 송구한 선수의 보살
+        for (let r of P.r) {
+          if (!live(r) || r.state !== `run` || r.target !== k) continue;
+          let remain = Math.abs(k - r.s) * BB_LEG;
+          if (isForce(r, k) || remain <= 8) out(r, k, isForce(r, k), b.by);
+          else if (!r.manual && !r.retouch) setTarget(r, k > r.s ? r.touched : Math.ceil(r.s)); // 늦었으면 되돌아감
+        }
+      },
+      arriveBase = (r) => {
+        let k = r.target;
+        if (P.ball.mode === `held` && P.holderBase === k && !r.trot) return out(r, k, isForce(r, k), P.assistBy || P.holder);
+        r.retouch && k === r.from && (r.retouch = !1);
+        if (k > r.touched) r.touched = k;
+        if (k === 4) return ((r.state = `scored`), (r.scoredT = P.t), P.runs.push({ id: r.id, t: P.t }));
+        r.state = `safe`;
+        if (P.caught && r.tagIntent && !r.retouch) return ((r.tagIntent = !1), setTarget(r, r.from + 1), void (r.delay = 0.25));
+        decide(r);
+      },
+      tick = (h) => {
+        P.t += h;
+        let t = P.t;
+        // 수비수 이동
+        for (let k in P.f) {
+          let f = P.f[k];
+          if (!f.goal || t < f.startAt) continue;
+          let dx = f.goal.x - f.x,
+            dy = f.goal.y - f.y,
+            d = Math.hypot(dx, dy),
+            m = f.spd * h;
+          d <= m ? ((f.x = f.goal.x), (f.y = f.goal.y)) : ((f.x += (dx / d) * m), (f.y += (dy / d) * m));
+        }
+        // 공
+        let b = P.ball;
+        if (b.mode === `track`) {
+          let s = sample(b.track, t);
+          s && ((b.x = s[1]), (b.y = s[2]), (b.h = s[3]));
+          if (!P.landed && t >= P.landT) {
+            P.landed = !0;
+            // 뜬공이 떨어졌으면 기다리던 주자들이 판단
+            if (P.ev && !P.ev.catch)
+              for (let r of P.r) {
+                // 공이 떨어지면 포스 상태인 주자는 반드시 다음 베이스로
+                live(r) && r !== bat && r.forced && r.state !== `wait` && r.target < r.from + 1 && setTarget(r, r.from + 1);
+                if (live(r) && r.state === `wait`) {
+                  ((r.state = `safe`), (r.target = r.s));
+                  // 플레이어가 미리 지시했으면 그대로, 아니면 AI 판단
+                  r.manual
+                    ? setTarget(r, r.holdS <= r.from && !r.forced ? r.from : Math.min(limitOf(r), r.from + 1))
+                    : decide(r);
+                }
+              }
+          }
+          if (P.ev && t >= P.ev.t && !P.fixedEnd) {
+            let f = P.f[P.ev.key];
+            dist(f, P.ev.p) < 2 && possess();
+          }
+        } else if (b.mode === `thrown`) {
+          let u = clamp((t - b.t0) / Math.max(0.01, b.t1 - b.t0), 0, 1);
+          ((b.x = b.from.x + (b.to.x - b.from.x) * u), (b.y = b.from.y + (b.to.y - b.from.y) * u), (b.h = 1.5 + 2.5 * u * (1 - u)));
+          t >= b.t1 && arrive();
+        } else if (b.mode === `held` && P.holder) {
+          let f = P.f[P.holder];
+          ((b.x = f.x), (b.y = f.y));
+        }
+        if (P.done) return;
+        // 주자
+        for (let r of P.r) {
+          if (!live(r)) continue;
+          if (r.delay > 0) {
+            r.delay -= h;
+            continue;
+          }
+          if (r.state === `wait`) {
+            let d = r.holdS - r.s,
+              m = speed(r) * h;
+            r.s += Math.abs(d) <= m ? d : Math.sign(d) * m;
+            continue;
+          }
+          if (r.state !== `run`) continue;
+          let dir = Math.sign(r.target - r.s),
+            ns = r.s + dir * speed(r) * h;
+          if (dir > 0) for (let k = Math.floor(r.s + 1e-6) + 1; k <= Math.floor(ns + 1e-6) && k < r.target; k++) r.touched = Math.max(r.touched, k);
+          if (dir === 0 || (dir > 0 && ns >= r.target) || (dir < 0 && ns <= r.target)) {
+            r.s = r.target;
+            arriveBase(r);
+            if (P.done) return;
+          } else r.s = ns;
+        }
+        // 고정 종료(홈런·파울)
+        if (P.fixedEnd != null) {
+          t >= P.fixedEnd && finish();
+          return;
+        }
+        // 수비
+        let thrown = !1;
+        P.ball.mode === `held` && t >= P.readyAt && (thrown = defense());
+        // 종료: 공을 잡고 있고, 움직이는 주자가 없고, 더 던질 곳도 없을 때
+        let busy = P.r.some((r) => live(r) && (r.state === `run` || r.state === `wait` || r.delay > 0 || r.tagIntent));
+        P.possessed && P.ball.mode === `held` && t >= P.readyAt && !thrown && !busy && finish();
+        t > 30 && finish();
+      };
+
+    // ── 외부에서 쓰는 함수들 ──
+    P.step = (dt) => {
+      for (let left = dt; left > 1e-9 && !P.done; left -= 0.02) tick(Math.min(0.02, left));
+    };
+    P.runToEnd = () => {
+      while (!P.done) tick(0.02);
+      return P;
+    };
+    P.live = (id) => {
+      let r = P.r.find((x) => x.id === id);
+      return !!r && live(r);
+    };
+    P.can = (id, cmd) => {
+      let r = P.r.find((x) => x.id === id);
+      if (!r || !live(r) || P.done || P.fixedEnd != null) return !1;
+      if (cmd === `advance`) {
+        if (P.caught && r.retouch) return !r.tagIntent;
+        let base = r.state === `run` && r.target > r.s ? r.target : Math.floor(r.s + 1e-6);
+        return base + 1 <= limitOf(r) && base < 4;
       }
+      // 귀루: 마지막으로 밟은 베이스로. 뒤 주자가 그 베이스로 오고 있으면 불가
+      if (r === bat && r.touched === 0) return !1;
+      if (r.state === `wait`) return r.holdS > r.from;
+      if (!(r.s > r.touched + 1e-6 || r.target > r.touched)) return !1;
+      // 뜬공이 떠 있는 동안은 언제든 귀루 가능 (잡히면 타자가 아웃되므로)
+      if (P.ball.mode === `track` && !P.landed && P.bb.kind !== `ground`) return !0;
+      let tr = trailOf(r);
+      return !(tr && tr.target >= r.touched && tr !== r);
+    };
+    P.command = (id, cmd) => {
+      if (!P.can(id, cmd)) return !1;
+      let r = P.r.find((x) => x.id === id);
+      r.manual = !0;
+      if (cmd === `advance`) {
+        if (P.caught && r.retouch) return ((r.tagIntent = !0), !0); // 베이스를 다시 밟자마자 태그업
+        if (r.state === `wait`) return ((r.state = `run`), (r.target = Math.min(limitOf(r), r.from + 1)), !0);
+        if (P.caught && r.state === `safe` && r.s === r.from) return (setTarget(r, r.from + 1), (r.delay = 0.25), !0);
+        let base = r.state === `run` && r.target > r.s ? r.target : Math.floor(r.s + 1e-6);
+        return (setTarget(r, Math.min(limitOf(r), base + 1)), !0);
+      }
+      if (r.state === `wait`) return ((r.holdS = r.from), !0);
+      return (setTarget(r, r.touched), !0);
+    };
+    P.commandAll = (cmd) => {
+      let list = cmd === `advance` ? P.r : [...P.r].reverse(),
+        any = !1;
+      for (let r of list) any = P.command(r.id, cmd) || any;
+      return any;
+    };
+    P.view = () => {
+      let fs = {},
+        rs = [];
+      for (let k in P.f) fs[k] = { x: P.f[k].x, y: P.f[k].y };
+      for (let r of P.r) {
+        let p = basePos(r.s),
+          vis = r.state === `out` ? P.t < r.outT + 0.6 : r.state === `scored` ? P.t < r.scoredT + 0.5 : !0;
+        rs.push({ id: r.id, x: p.x, y: p.y, state: r.state, visible: vis, manual: r.manual });
+      }
+      return { ball: { x: P.ball.x, y: P.ball.y, h: P.ball.h || 0 }, fielders: fs, runners: rs };
+    };
+    P.result = () => result(P);
+    return P;
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  // 결과 정리: 아웃·득점·누상 주자·기록 문구
+  function result(P) {
+    let bb = P.bb,
+      st = P.st,
+      res = { bb, foul: P.foul, homeRun: P.homeRun, distance: P.distance, outsAdded: 0, runs: 0, newBases: [...st.bases] };
+    if (P.foul) {
+      if (P.foulOut) {
+        let why = `${BB_POS[P.foulOut]} 파울플라이`;
+        return Object.assign(res, { foul: !0, foulOut: !0, outsAdded: 1, label: why, display: bbOut(why), status: `${BB_POS[P.foulOut]}가 파울 지역에서 잡아냄` });
+      }
+      return Object.assign(res, { label: `파울` });
+    }
+    if (P.homeRun) {
+      let n = P.r.length;
       return Object.assign(res, {
-        homeRun: !0,
         runs: n,
         newBases: [!1, !1, !1],
         batterBase: 4,
@@ -345,157 +689,62 @@ var BB_SIM = (() => {
         display: `${HR[n]}!<br><span class="bb-out-reason">${Math.round(bb.D)}m · ${n}타점</span>`,
         color: `#f1c40f`,
         status: `담장을 넘겼다! ${Math.round(bb.D)}m ${HR[n]}`,
-        dur: bb.T + 1.4,
       });
     }
-
-    // ── 안타 처리 후 주루: 주자마다 송구보다 먼저 도착할 수 있으면 한 베이스 더 ──
-    function advance(h) {
-      let release = h.t + c.transfer + 0.15,
-        thr = (b) => {
-          let d = dist(h.p, BB_BASES[b]);
-          return release + d / c.thr + (d > 62 ? 0.45 : 0); // 62m 넘으면 중계
-        },
-        list = runnerList(),
-        limit = 4;
-      for (let r of list) {
-        let start = r.from === 0 ? 0 : h.runStart,
-          minB = r.from === 0 ? 1 : forced(r.from) ? r.from + 1 : r.from,
-          margin = rnd(-0.35, 0.75), // 주자 성향: 음수면 무리한 주루
-          k = r.from;
-        while (k + 1 <= limit) {
-          let a = arrival(r, k + 1, start);
-          if (k + 1 <= minB || a < thr(k + 1) - margin) k++;
-          else break;
-        }
-        ((r.start = start), (r.target = k), (r.arr = arrival(r, k, start)), (limit = k === 4 ? 4 : k - 1));
-      }
-      // 수비: 잡을 수 있는 주자 중 가장 앞선 주자에게 송구
-      let cand = list.filter((r) => r.target > r.from && thr(r.target) < r.arr).sort((a, b) => b.target - a.target)[0],
-        lead = list[0],
-        tgtBase = cand ? cand.target : Math.min(4, Math.max(2, lead.target === 4 ? 4 : lead.target)),
-        tOut = cand ? thr(cand.target) : null;
-      throwTo(h.p, BB_BASES[tgtBase], release, thr(tgtBase));
-      coverMove(tgtBase, h.key, thr(tgtBase));
-      let runs = 0,
-        nb = [!1, !1, !1],
-        outs3 = cand && st.outs + 1 >= 3;
-      for (let r of list) {
-        let isOut = r === cand;
-        (runTrack(r, r.start, r.target, isOut ? tOut : null),
-          isOut ||
-            (r.target === 4 ? (!outs3 || r.arr < tOut) && runs++ : r.target > 0 && (nb[r.target - 1] = !0)));
-      }
-      let bat = list[list.length - 1],
-        hitBases = bat === cand ? bat.target - 1 : bat.target,
-        hitName = h.error ? `실책 출루` : HIT[hitBases] || `안타`,
-        why = cand ? (cand.target === 4 ? `${BB_POS[h.key]} 홈 보살` : `${BB_POS[h.key]} → ${cand.target}루 송구 아웃`) : null,
-        rbiText = runs ? `${runs}타점 ` : ``;
-      return Object.assign(res, {
-        outsAdded: cand ? 1 : 0,
-        runs,
-        newBases: nb,
-        batterBase: bat === cand ? 0 : bat.target,
-        label: cand ? `${hitName} → ${why}` : rbiText + hitName,
-        display: cand ? bbOut(why) : hitBases === 4 ? `그라운드 홈런!!<br><span class="bb-out-reason">${runs}타점</span>` : rbiText + hitName,
-        color: cand ? `#c0392b` : hitBases >= 4 ? `#f1c40f` : `#2ecc71`,
-        status: cand
-          ? `${hitName}, 그러나 ${why}`
-          : `${hitName}! ${res.wallBall ? `펜스 직격, ` : ``}${HIT[bat.target] ? `타자 ${bat.target === 4 ? `홈인` : bat.target + `루까지`}` : ``}`,
-        fieldedBy: h.key,
-        dur: Math.max(thr(tgtBase), ...list.map((r) => (r === cand ? tOut : r.arr))) + 0.7,
-      });
+    let outs = P.outs,
+      total = st.outs + outs.length,
+      third = total >= 3 ? outs[2 - st.outs] : null,
+      runs = P.runs.filter((x) => !third || (!third.force && x.t < third.t)).length,
+      nb = [!1, !1, !1];
+    if (total < 3) for (let r of P.r) r.state === `safe` && r.s >= 1 && r.s <= 3 && Number.isInteger(r.s) && (nb[r.s - 1] = !0);
+    let bat = P.bat,
+      ev = P.ev,
+      pos = BB_POS[ev.key],
+      batOut = outs.find((o) => o.id === `runner-t`),
+      otherOuts = outs.filter((o) => o.id !== `runner-t`),
+      baseName = (k) => (k === 4 ? `홈` : `${k}루`),
+      throwWhy = (o) => (o.base === 4 ? `${BB_POS[o.by] || pos} 홈 보살` : `${BB_POS[o.by] || pos} → ${baseName(o.base)} 송구 아웃`),
+      why = null,
+      label;
+    if (P.caught) {
+      let sac = runs > 0 && total < 3;
+      ((why = `${pos} ${sac ? `희생플라이` : KIND_OUT[bb.kind]}`), (label = why));
+      otherOuts.length && ((why += ` · 더블플레이`), (label = why));
+    } else if (batOut) {
+      if (bat.touched === 0)
+        ((why = bb.kind === `ground` ? `${pos} ${outs.length >= 2 ? `병살타` : `땅볼`}` : `${pos} → 1루 송구 아웃`), (label = why));
+      else ((why = throwWhy(batOut)), (label = `${HIT[bat.touched]} → ${baseName(batOut.base)}에서 아웃`));
+    } else {
+      let b = bat.state === `scored` ? 4 : Math.round(bat.s),
+        fc = bb.kind === `ground` && otherOuts.some((o) => o.force);
+      label = P.error ? `${pos} 실책 출루` : fc ? `${pos} 땅볼, 야수선택` : bb.kind === `ground` && ev.infield && b === 1 ? `내야안타` : HIT[b] || `안타`;
+      otherOuts.length && ((why = fc ? `${baseName(otherOuts[0].base)} 포스아웃` : throwWhy(otherOuts[0])), (label += ` (주자 ${baseName(otherOuts[0].base)}에서 아웃)`));
+      res.batterBase = b;
     }
-
-    // ── 내야 땅볼: 포스/병살/1루 송구, 내야안타 ──
-    function infieldPlay(f, g) {
-      (roll(g, 0, f.t), move(f.key, f.p, f.n), (res.distance = Math.round(dist(f.p, { x: 0, y: 0 }))));
-      let err = R() < c.gbErr,
-        release = f.t + c.transfer + (err ? 1.4 : 0),
-        list = runnerList(),
-        r1 = list.find((r) => r.from === 1),
-        bat = list[list.length - 1],
-        start = 0.1,
-        outs = [], // { r, base, t, force }
-        B1 = BB_BASES[1],
-        B2 = BB_BASES[2],
-        tThrow = null,
-        lastBall = f.p,
-        lastT = release;
-      for (let r of list) r.start = r.from === 0 ? 0 : start;
-      if (!err && r1 && st.outs < 2 && f.key !== `inf-1b`) {
-        let t2 = release + dist(f.p, B2) / c.thr;
-        if (t2 < arrival(r1, 2, start)) {
-          (outs.push({ r: r1, base: 2, t: t2 }), throwTo(f.p, B2, release, t2), coverMove(2, f.key, t2));
-          let t1 = t2 + 0.55 + dist(B2, B1) / c.thr;
-          (throwTo(B2, B1, t2 + 0.55, t1), coverMove(1, f.key, t1), (lastT = t1), (lastBall = B1));
-          t1 < arrival(bat, 1, 0) && outs.push({ r: bat, base: 1, t: t1 });
-          tThrow = !0;
-        }
-      }
-      if (!tThrow && !err) {
-        let t1 =
-          f.key === `inf-1b` && dist(f.p, B1) < 9
-            ? f.t + 0.2 + dist(f.p, B1) / c.ifSpd
-            : release + dist(f.p, B1) / c.thr;
-        (f.key === `inf-1b` && dist(f.p, B1) < 9
-          ? move(f.key, B1, t1)
-          : (throwTo(f.p, B1, release, t1), coverMove(1, f.key, t1)),
-          (lastT = t1));
-        t1 < arrival(bat, 1, 0) && outs.push({ r: bat, base: 1, t: t1 });
-      }
-      let totalOuts = st.outs + outs.length,
-        isOut = (r) => outs.find((o) => o.r === r),
-        rightSide = f.key === `inf-1b` || f.key === `inf-2b`;
-      for (let r of list) {
-        let o = isOut(r);
-        if (o) r.target = o.base;
-        else if (r.from === 0) r.target = 1;
-        else if (forced(r.from) || st.outs === 2) r.target = r.from + 1;
-        else if (r.from === 2) r.target = rightSide ? 3 : 2;
-        else if (r.from === 3) r.target = f.key === `inf-3b` || f.key === `catcher` ? 3 : 4;
-        else r.target = r.from;
-        r.arr = arrival(r, r.target, r.start);
-      }
-      // 앞 주자를 추월하지 않게 정리
-      let limit = 4;
-      for (let r of list) (isOut(r) || ((r.target = Math.min(r.target, limit)), (r.arr = arrival(r, r.target, r.start))), (limit = r.target === 4 ? 4 : r.target - 1));
-      let runs = 0,
-        nb = [!1, !1, !1];
-      for (let r of list) {
-        let o = isOut(r);
-        (runTrack(r, r.start, r.target, o ? o.t : null),
-          o || (r.target === 4 ? totalOuts < 3 && runs++ : r.target > 0 && (nb[r.target - 1] = !0)));
-      }
-      let pos = BB_POS[f.key],
-        dp = outs.length === 2,
-        batOut = isOut(bat),
-        why = dp ? `${pos} 병살타` : batOut ? `${pos} 땅볼` : outs.length ? `2루 포스아웃` : null,
-        label = err
-          ? `${pos} 실책 출루`
-          : dp
-            ? why
-            : batOut
-              ? why + (runs ? ` (${runs}타점)` : r1 || bases[1] ? ` (진루타)` : ``)
-              : outs.length
-                ? `${pos} 땅볼, 야수선택 (2루 포스아웃)`
-                : `${runs ? runs + `타점 ` : ``}내야안타`;
-      return Object.assign(res, {
-        outsAdded: outs.length,
-        runs,
-        newBases: nb,
-        batterBase: batOut ? 0 : 1,
-        label,
-        display: err ? `실책!<br><span class="bb-out-reason">(${pos})</span>` : why ? bbOut(why) : label,
-        color: err ? `#e67e22` : why ? `#c0392b` : `#2ecc71`,
-        status: err ? `${pos} 포구 실책! 타자 출루` : dp ? `병살! 아웃카운트 2개` : batOut ? `${pos} 땅볼 아웃` : outs.length ? `2루 포스아웃, 타자는 1루 세이프` : `내야안타! 1루 세이프`,
-        fieldedBy: f.key,
-        dur: Math.max(lastT, ...list.map((r) => r.arr)) + 0.7,
-      });
-    }
+    runs && !P.caught && (label = `${runs}타점 ` + label);
+    let hitText = label,
+      color = why ? `#c0392b` : P.error ? `#e67e22` : /홈런/.test(label) ? `#f1c40f` : `#2ecc71`;
+    return Object.assign(res, {
+      outsAdded: outs.length,
+      runs,
+      newBases: nb,
+      caught: P.caught,
+      fieldedBy: ev.key,
+      label,
+      display: why ? bbOut(why) : P.error ? `실책!<br><span class="bb-out-reason">(${pos})</span>` : hitText,
+      color,
+      status: why
+        ? `${why}${runs ? ` · ${runs}점 득점` : ``}`
+        : `${label}! ${P.wallBall ? `펜스 직격, ` : ``}${res.batterBase === 4 ? `타자 홈인` : res.batterBase ? `타자 ${res.batterBase}루` : ``}`,
+    });
   }
 
-  // 희생플라이 태그업: 잡은 지점에서 다음 베이스까지 송구 vs 주자
+  // 한 번에 끝까지 진행 (AI 주루만 사용) — 밸런스 테스트용
+  function play(bb, st) {
+    return start(bb, st).runToEnd().result();
+  }
+
+  // (구버전 호환) 희생플라이 태그업 판정
   function tagUp(catchM, fromBase, diff) {
     let c = cfg(diff),
       d = dist(catchM, BB_BASES[fromBase + 1]),
@@ -504,9 +753,382 @@ var BB_SIM = (() => {
     return runT + rnd(-0.35, 0.35) < ballT;
   }
 
-  return { batted, play, sample, tagUp, cfg };
+  return { batted, start, play, sample, tagUp, cfg, basePos };
 })();
 typeof module !== `undefined` && (module.exports = { BB_SIM, bbFence, BB_FIELD_M, BB_BASES }); // Node 테스트용
+
+// ── 타자·투수 동작: 3D 뼈대(스켈레톤)를 키프레임으로 보간해 캔버스에 그림 ──
+// 관절 위치는 미터 단위. 포즈는 골반·어깨 회전, 상체 기울기, 발·손 위치로 정하고
+// 팔·다리는 2관절 IK(역운동학)로 팔꿈치·무릎을 계산합니다. 매 프레임 보간되므로 동작이 끊기지 않음.
+var BB_RIG = (() => {
+  let rad = (d) => (d * Math.PI) / 180,
+    clamp = (v, a, b) => Math.max(a, Math.min(b, v)),
+    ease = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t)),
+    easeOut = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : 1 - (1 - t) * (1 - t)),
+    easeIn = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t),
+    // 로컬 벡터 {f, u, s}: f = 앞(투수/홈 방향), u = 위, s = 가슴이 향하는 옆 방향(닫힌 자세 기준)
+    L = (f = 0, u = 0, s = 0) => ({ f, u, s }),
+    add = (a, b) => L(a.f + b.f, a.u + b.u, a.s + b.s),
+    sub = (a, b) => L(a.f - b.f, a.u - b.u, a.s - b.s),
+    mul = (a, k) => L(a.f * k, a.u * k, a.s * k),
+    dot = (a, b) => a.f * b.f + a.u * b.u + a.s * b.s,
+    len = (a) => Math.sqrt(dot(a, a)),
+    nrm = (a) => mul(a, 1 / (len(a) || 1)),
+    lerpV = (a, b, t) => L(a.f + (b.f - a.f) * t, a.u + (b.u - a.u) * t, a.s + (b.s - a.s) * t),
+    UP = L(0, 1, 0),
+    // 2관절 IK: 시작 a에서 끝 c까지, 길이 l1·l2, pole 쪽으로 굽힘
+    ik = (a, c, l1, l2, pole) => {
+      let d = sub(c, a),
+        D = clamp(len(d), Math.abs(l1 - l2) + 1e-3, (l1 + l2) * 0.999),
+        dn = nrm(d),
+        x = (l1 * l1 - l2 * l2 + D * D) / (2 * D),
+        h = Math.sqrt(Math.max(0, l1 * l1 - x * x)),
+        pp = sub(pole, mul(dn, dot(pole, dn)));
+      return add(add(a, mul(dn, x)), mul(nrm(pp), h));
+    },
+    // 포즈 보간 (숫자와 벡터 모두)
+    blend = (p, q, t) => {
+      let o = {};
+      for (let k in p) {
+        let a = p[k],
+          b = q[k] ?? a;
+        o[k] = typeof a === `number` ? a + (b - a) * t : lerpV(a, b, t);
+      }
+      return o;
+    },
+    // 포즈 → 관절 (로컬 좌표)
+    solve = (p) => {
+      let a = rad(p.hipYaw),
+        b = rad(p.torsoYaw),
+        ln = rad(p.lean),
+        hipLine = L(Math.cos(a), 0, -Math.sin(a)), // 뒤 → 앞 골반
+        chestH = L(Math.sin(a), 0, Math.cos(a)),
+        shLine = L(Math.cos(b), 0, -Math.sin(b)), // 뒤 → 앞 어깨
+        chestT = L(Math.sin(b), 0, Math.cos(b)),
+        spine = nrm(add(mul(UP, Math.cos(ln)), mul(chestT, Math.sin(ln)))),
+        pel = p.pel,
+        neck = add(pel, mul(spine, 0.52)),
+        J = {
+          pel,
+          neck,
+          head: add(add(neck, mul(spine, 0.22)), L(0.02, 0.02, 0)),
+          fSh: add(add(neck, mul(shLine, 0.19)), L(0, -0.04, 0)),
+          bSh: add(add(neck, mul(shLine, -0.19)), L(0, -0.04, 0)),
+          fHip: add(pel, mul(hipLine, 0.12)),
+          bHip: add(pel, mul(hipLine, -0.12)),
+          chestT,
+          chestH,
+        };
+      // 손: 배트를 쥔 타자는 손 위치 + 배트 방향으로, 투수는 양손 따로
+      if (p.bat) {
+        let bd = nrm(p.bat);
+        ((J.fHand = sub(p.hands, mul(bd, 0.045))), (J.bHand = add(p.hands, mul(bd, 0.045))));
+        ((J.knob = sub(J.fHand, mul(bd, 0.07))), (J.tip = add(p.hands, mul(bd, 0.84))));
+      } else ((J.fHand = p.handF), (J.bHand = p.handB));
+      J.fElb = ik(J.fSh, J.fHand, 0.29, 0.27, add(add(mul(UP, -1), mul(chestT, 0.4)), mul(shLine, 0.25)));
+      J.bElb = ik(J.bSh, J.bHand, 0.29, 0.27, p.bElbPole || add(add(mul(UP, -0.6), mul(chestT, -0.2)), mul(shLine, -0.7)));
+      let fAnk = add(p.ff, L(0, 0.08, 0)),
+        bAnk = add(p.bf, L(0, 0.08, 0));
+      J.fAnk = fAnk;
+      J.bAnk = bAnk;
+      J.fKnee = ik(J.fHip, fAnk, 0.46, 0.45, add(chestH, L(0.35, 0, 0)));
+      J.bKnee = ik(J.bHip, bAnk, 0.46, 0.45, add(chestH, L(-0.15, 0, 0)));
+      // 발끝: 대체로 가슴 방향
+      J.fToe = add(fAnk, mul(nrm(add(p.fToeDir || chestH, L(0.25, 0, 0))), 0.22));
+      J.bToe = add(bAnk, mul(nrm(p.bToeDir || chestH), 0.22));
+      return J;
+    };
+
+  // ── 타자 키프레임 (좌타 기준. f = 투수 쪽, s = 홈플레이트 쪽) ──
+  let BAT = {
+    stance: { hipYaw: 4, torsoYaw: -4, lean: 20, pel: L(-0.03, 0.9, -0.02), ff: L(0.38, 0, 0.02), bf: L(-0.36, 0, -0.02), hands: L(-0.16, 1.4, 0.2), bat: L(-0.45, 0.82, -0.36) },
+    load: { hipYaw: -14, torsoYaw: -22, lean: 19, pel: L(-0.12, 0.88, -0.02), ff: L(0.24, 0.14, 0.04), bf: L(-0.36, 0, -0.02), hands: L(-0.3, 1.44, 0.12), bat: L(-0.58, 0.64, -0.48) },
+    stride: { hipYaw: 12, torsoYaw: -18, lean: 20, pel: L(0.02, 0.86, 0), ff: L(0.56, 0, 0.05), bf: L(-0.36, 0, -0.02), hands: L(-0.3, 1.38, 0.14), bat: L(-0.62, 0.5, -0.52) },
+    contact: { hipYaw: 72, torsoYaw: 84, lean: 22, pel: L(0.07, 0.86, 0.04), ff: L(0.56, 0, 0.05), bf: L(-0.34, 0.03, 0.02), hands: L(0.1, 1.0, 0.42), bat: L(0.22, -0.06, 1), bToeDir: L(0.6, 0, 1) },
+    extend: { hipYaw: 92, torsoYaw: 118, lean: 18, pel: L(0.08, 0.87, 0.04), ff: L(0.56, 0, 0.05), bf: L(-0.32, 0.05, 0.04), hands: L(0.38, 1.12, 0.28), bat: L(0.92, 0.08, 0.36), bToeDir: L(0.8, 0, 0.6) },
+    follow: { hipYaw: 100, torsoYaw: 152, lean: 10, pel: L(0.07, 0.9, 0.03), ff: L(0.56, 0, 0.05), bf: L(-0.28, 0.08, 0.06), hands: L(0.04, 1.56, -0.12), bat: L(-0.55, 0.18, -0.82), bToeDir: L(1, 0, 0.3) },
+  };
+  // ── 투수 키프레임 (우투. f = 홈 방향, s = 닫힌 자세에서 가슴 방향) ──
+  let PIT = {
+    set: { hipYaw: 82, torsoYaw: 82, lean: 6, pel: L(0, 0.98, 0), ff: L(0.04, 0, 0.16), bf: L(-0.04, 0, -0.16), handF: L(0.22, 1.3, 0.04), handB: L(0.22, 1.3, -0.04) },
+    lift: { hipYaw: 4, torsoYaw: -8, lean: 4, pel: L(-0.06, 1.0, 0), ff: L(0.08, 0.56, 0.12), bf: L(-0.06, 0, 0), handF: L(0.06, 1.38, 0.24), handB: L(0.02, 1.38, 0.22) },
+    stride: { hipYaw: 32, torsoYaw: -6, lean: 8, pel: L(0.36, 0.84, 0), ff: L(0.98, 0, 0.06), bf: L(-0.06, 0, 0), handF: L(0.78, 1.36, 0.08), handB: L(-0.58, 1.2, -0.14), fToeDir: L(1, 0, 0.3) },
+    cock: { hipYaw: 70, torsoYaw: 40, lean: 12, pel: L(0.5, 0.82, 0), ff: L(0.98, 0, 0.06), bf: L(-0.02, 0.02, 0), handF: L(0.48, 1.2, 0.26), handB: L(-0.16, 1.78, -0.26), fToeDir: L(1, 0, 0.3) },
+    release: { hipYaw: 90, torsoYaw: 102, lean: 26, pel: L(0.62, 0.8, 0), ff: L(0.98, 0, 0.06), bf: L(0.1, 0.06, -0.04), handF: L(0.3, 1.12, 0.2), handB: L(0.6, 1.74, -0.2), fToeDir: L(1, 0, 0.2), bElbPole: L(-0.3, 0.6, -0.6) },
+    follow: { hipYaw: 96, torsoYaw: 124, lean: 46, pel: L(0.7, 0.74, 0.02), ff: L(0.98, 0, 0.06), bf: L(0.0, 0.38, -0.22), handF: L(0.2, 1.0, 0.26), handB: L(0.62, 0.62, 0.36), fToeDir: L(1, 0, 0.2) },
+    ready: { hipYaw: 90, torsoYaw: 90, lean: 22, pel: L(0.62, 0.88, 0), ff: L(0.78, 0, 0.26), bf: L(0.6, 0, -0.26), handF: L(0.85, 0.95, 0.12), handB: L(0.85, 0.95, -0.12) },
+  };
+
+  // 시간축 키프레임 재생: [[시각, 포즈, 보간], ...]
+  let seq = (frames, t) => {
+    if (t <= frames[0][0]) return frames[0][1];
+    for (let i = 1; i < frames.length; i++)
+      if (t <= frames[i][0]) {
+        let [t0, p0] = frames[i - 1],
+          [t1, p1, fn] = frames[i];
+        return blend(p0, p1, (fn || ease)((t - t0) / (t1 - t0)));
+      }
+    return frames[frames.length - 1][1];
+  };
+
+  // ── 그리기 도구 ──
+  let cap = (g, a, b, w, color, outline = `#0000008c`) => {
+    (g.beginPath(), g.moveTo(a.x, a.y), g.lineTo(b.x, b.y));
+    ((g.lineCap = `round`), (g.strokeStyle = outline), (g.lineWidth = w + 2.2), g.stroke());
+    ((g.strokeStyle = color), (g.lineWidth = w), g.stroke());
+  };
+
+  function create(canvasP, canvasB) {
+    let gp = canvasP.getContext(`2d`),
+      gb = canvasB.getContext(`2d`),
+      dpr = Math.min(2, window.devicePixelRatio || 1),
+      paused = !1,
+      pausedAt = 0,
+      pausedSum = 0,
+      clock = () => (paused ? pausedAt : performance.now()) - pausedSum,
+      bat = { state: `idle`, t0: 0, from: BAT.stance, hand: `L`, num: 1, trail: [] },
+      pit = { state: `idle`, t0: 0 },
+      lastBatPose = BAT.stance;
+    for (let c of [canvasP, canvasB]) ((c.width = 850 * dpr), (c.height = 580 * dpr));
+
+    // ── 타자 카메라: 포수 뒤, 눈높이 0.8m(스트라이크존 중앙과 같은 높이) ──
+    let CAM = { x: 0, y: 0.8, z: -2.8 },
+      FOC = 625,
+      OX = 425,
+      OY = 337.5,
+      // 좌타는 1루 쪽(+x), 우타는 3루 쪽(-x). 모델을 살짝 돌려 등이 보이게(실제 중계 화면 느낌)
+      batWorld = (v) => {
+        let side = bat.hand === `R` ? -1 : 1,
+          yaw = rad(32),
+          // 로컬 → 좌타 월드: f → +z(투수), s → -x(홈 쪽), u → +y
+          x0 = -v.s,
+          z0 = v.f,
+          x = x0 * Math.cos(yaw) + z0 * Math.sin(yaw),
+          z = -x0 * Math.sin(yaw) + z0 * Math.cos(yaw);
+        return { x: side * (0.78 + x), y: v.u, z: 0.15 + z };
+      },
+      projB = (v) => {
+        let w = batWorld(v),
+          Z = w.z - CAM.z;
+        return { x: OX + (FOC * (w.x - CAM.x)) / Z, y: OY - (FOC * (w.y - CAM.y)) / Z, s: FOC / Z, z: Z };
+      },
+      // ── 투수: 마운드(화면 425, 262)에 작게. 홈(카메라) 쪽을 향함 ──
+      PS = 27,
+      projP = (v) => {
+        // 로컬 → 월드: f → -z(홈), s → -x(닫힌 자세에서 가슴이 3루 쪽), u → +y
+        let x = -v.s,
+          z = -v.f;
+        return { x: 425 + x * PS, y: 262 - v.u * PS, s: PS, z };
+      };
+
+    let batPose = (t) => {
+        let d = (t - bat.t0) / 1000,
+          B = BAT;
+        switch (bat.state) {
+          case `load`:
+            return seq([[0, bat.from], [0.26, B.load], [0.34, B.load], [0.52, B.stride]], d);
+          case `swing`:
+            return seq([[0, bat.from], [0.11, B.contact, easeIn], [0.18, B.extend, (x) => x], [0.44, B.follow, easeOut]], d);
+          case `take`:
+            return seq([[0, bat.from], [0.45, B.stance]], d);
+          default: {
+            // 대기: 배트를 가볍게 흔듦
+            let w = Math.sin(t / 380) * 0.07,
+              p = blend(bat.from, B.stance, ease(d / 0.5));
+            return { ...p, bat: add(p.bat, L(w, 0, -w * 0.6)), hands: add(p.hands, L(0, Math.sin(t / 520) * 0.012, 0)) };
+          }
+        }
+      },
+      pitPose = (t) => {
+        let d = (t - pit.t0) / 1000,
+          Pp = PIT;
+        switch (pit.state) {
+          case `windup`: // 1.2초 뒤 릴리스
+            return seq([[0, Pp.set], [0.5, Pp.lift], [0.9, Pp.stride], [1.08, Pp.cock], [1.2, Pp.release, easeIn]], d);
+          case `release`:
+            return seq([[0, Pp.release], [0.3, Pp.follow, easeOut], [1.1, Pp.follow], [1.7, Pp.ready]], d);
+          default:
+            return Pp.set;
+        }
+      };
+
+    function drawFigure(g, J, proj, style) {
+      let P = {};
+      for (let k in J) J[k] && J[k].f !== void 0 && (P[k] = proj(J[k]));
+      let k = P.pel.s,
+        items = [],
+        push = (z, fn) => items.push({ z, fn }),
+        zOf = (...ks) => ks.reduce((a, b) => a + P[b].z, 0) / ks.length;
+      // 다리
+      for (let sd of [`b`, `f`]) {
+        push(zOf(sd + `Hip`, sd + `Knee`), () => cap(g, P[sd + `Hip`], P[sd + `Knee`], 0.145 * k, style.pants));
+        push(zOf(sd + `Knee`, sd + `Ank`) - 0.01, () => {
+          let mid = { x: (P[sd + `Knee`].x * 0.45 + P[sd + `Ank`].x * 0.55), y: (P[sd + `Knee`].y * 0.45 + P[sd + `Ank`].y * 0.55) };
+          (cap(g, P[sd + `Knee`], mid, 0.115 * k, style.pants), cap(g, mid, P[sd + `Ank`], 0.095 * k, style.socks));
+        });
+        push(zOf(sd + `Ank`, sd + `Toe`) - 0.02, () => cap(g, P[sd + `Ank`], P[sd + `Toe`], 0.09 * k, `#151515`));
+      }
+      // 몸통 (어깨~골반 사각형) + 등번호
+      push(zOf(`fSh`, `bSh`, `fHip`, `bHip`), () => {
+        let q = [P.fSh, P.bSh, P.bHip, P.fHip];
+        (g.beginPath(), q.forEach((p, i) => (i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y))), g.closePath());
+        ((g.lineJoin = `round`), (g.strokeStyle = `#0000008c`), (g.lineWidth = 0.13 * k + 2.2), g.stroke());
+        ((g.fillStyle = style.jersey), (g.strokeStyle = style.jersey), (g.lineWidth = 0.13 * k), g.fill(), g.stroke());
+        // 벨트
+        cap(g, P.fHip, P.bHip, 0.06 * k, style.belt, `transparent`);
+        // 등이 카메라 쪽이면 등번호
+        if (style.num != null) {
+          let back = proj(sub(J.neck, mul(J.chestT, 0.3))),
+            front = proj(add(J.neck, mul(J.chestT, 0.3))),
+            facing = back.z < front.z, // 등이 더 가까움
+            cx = (P.fSh.x + P.bSh.x + P.fHip.x + P.bHip.x) / 4,
+            cy = (P.fSh.y + P.bSh.y) / 2 * 0.55 + (P.fHip.y + P.bHip.y) / 2 * 0.45,
+            wsh = Math.abs(P.fSh.x - P.bSh.x) / (0.38 * k);
+          facing &&
+            wsh > 0.25 &&
+            (g.save(),
+            g.translate(cx, cy),
+            g.scale(Math.min(1, wsh), 1),
+            (g.font = `900 ${0.2 * k}px "Arial Black", Arial, sans-serif`),
+            (g.textAlign = `center`),
+            (g.textBaseline = `middle`),
+            (g.fillStyle = style.numColor),
+            g.fillText(String(style.num), 0, 0),
+            g.restore());
+        }
+      });
+      // 팔 (뒤 팔 → 앞 팔은 깊이로 정렬)
+      for (let sd of [`b`, `f`]) {
+        push(zOf(sd + `Sh`, sd + `Elb`), () => cap(g, P[sd + `Sh`], P[sd + `Elb`], 0.11 * k, style.sleeve));
+        push(zOf(sd + `Elb`, sd + `Hand`), () => {
+          (cap(g, P[sd + `Elb`], P[sd + `Hand`], 0.085 * k, style.skin),
+            g.beginPath(),
+            g.arc(P[sd + `Hand`].x, P[sd + `Hand`].y, Math.max(1.5, (sd === `f` ? style.fGloveR : 0.05) * k), 0, 7),
+            (g.fillStyle = sd === `f` ? style.fGlove : style.glove),
+            g.fill());
+        });
+      }
+      // 배트 (손잡이 가늘고 배럴 굵게) + 스윙 잔상
+      if (P.tip) {
+        push(Math.min(P.knob.z, P.tip.z) - 0.05, () => {
+          for (let i = 0; i < style.trail.length; i++) {
+            let [a, b] = style.trail[i];
+            ((g.globalAlpha = 0.07 + 0.05 * i), cap(g, a, b, 0.05 * k, `#d9a463`, `transparent`));
+          }
+          g.globalAlpha = 1;
+          let a = P.knob,
+            b = P.tip,
+            dx = b.x - a.x,
+            dy = b.y - a.y,
+            l = Math.hypot(dx, dy) || 1,
+            nx = -dy / l,
+            ny = dx / l,
+            w0 = 0.016 * k,
+            w1 = 0.034 * k,
+            m = { x: a.x + dx * 0.45, y: a.y + dy * 0.45 },
+            grad = g.createLinearGradient(a.x + nx * w1, a.y + ny * w1, a.x - nx * w1, a.y - ny * w1);
+          (grad.addColorStop(0, `#7d4f24`), grad.addColorStop(0.45, `#e2b070`), grad.addColorStop(1, `#8a5a2b`));
+          (g.beginPath(),
+            g.moveTo(a.x + nx * w0, a.y + ny * w0),
+            g.lineTo(m.x + nx * w0 * 1.1, m.y + ny * w0 * 1.1),
+            g.lineTo(b.x + nx * w1, b.y + ny * w1),
+            g.arc(b.x, b.y, w1, Math.atan2(ny, nx), Math.atan2(ny, nx) + Math.PI, !0),
+            g.lineTo(m.x - nx * w0 * 1.1, m.y - ny * w0 * 1.1),
+            g.lineTo(a.x - nx * w0, a.y - ny * w0),
+            g.closePath(),
+            (g.fillStyle = grad),
+            g.fill(),
+            (g.strokeStyle = `#0000008c`),
+            (g.lineWidth = 1),
+            g.stroke());
+          (g.beginPath(), g.arc(a.x, a.y, w0 * 1.5, 0, 7), (g.fillStyle = `#5c3a1a`), g.fill());
+        });
+      }
+      // 머리 (헬멧/모자): 어깨 위에 있으므로 몸통보다 나중에 그림
+      push(Math.min(P.head.z, P.neck.z) - 0.25, () => {
+        let h = P.head,
+          r = style.headR * k;
+        (cap(g, P.neck, h, 0.09 * k, style.skin),
+          g.beginPath(),
+          g.arc(h.x, h.y, r, 0, 7),
+          (g.fillStyle = style.helmet),
+          g.fill(),
+          (g.strokeStyle = `#0000008c`),
+          (g.lineWidth = 1.2),
+          g.stroke(),
+          g.beginPath(),
+          g.ellipse(h.x - r * 0.3, h.y - r * 0.35, r * 0.4, r * 0.22, -0.5, 0, 7),
+          (g.fillStyle = `#ffffff30`),
+          g.fill());
+        // 챙: 시선(f) 방향
+        let fwd = proj(add(J.head, L(0.14, -0.03, 0)));
+        (g.beginPath(), g.ellipse((h.x + fwd.x) / 2, (h.y + fwd.y) / 2 + r * 0.25, r * 0.75, r * 0.28, 0, 0, 7), (g.fillStyle = style.helmet), g.fill());
+      });
+      items.sort((a, b) => b.z - a.z).forEach((it) => it.fn());
+    }
+
+    let BAT_STYLE = { jersey: `#f4f5f8`, pants: `#e6e8ee`, socks: `#1b2944`, belt: `#1b2944`, sleeve: `#f4f5f8`, skin: `#d7a77c`, glove: `#222`, fGlove: `#222`, fGloveR: 0.05, helmet: `#13284b`, headR: 0.125, numColor: `#1b2944`, trail: [] },
+      PIT_STYLE = { jersey: `#d9dce2`, pants: `#cfd3da`, socks: `#1b2944`, belt: `#1b2944`, sleeve: `#d9dce2`, skin: `#d7a77c`, glove: `#d7a77c`, fGlove: `#7a4a1f`, fGloveR: 0.09, helmet: `#1b2944`, headR: 0.11, num: null, trail: [] };
+
+    let raf = 0,
+      visible = !0,
+      frame = () => {
+        raf = requestAnimationFrame(frame);
+        if (!visible) return;
+        let t = clock();
+        // 투수
+        (gp.setTransform(dpr, 0, 0, dpr, 0, 0), gp.clearRect(0, 0, 850, 580));
+        let pj = solve(pitPose(t));
+        // 그림자
+        ((gp.fillStyle = `#00000040`), gp.beginPath(), gp.ellipse(425 + 0.3 * PS, 263, 0.9 * PS, 0.12 * PS, 0, 0, 7), gp.fill());
+        drawFigure(gp, pj, projP, PIT_STYLE);
+        // 타자
+        (gb.setTransform(dpr, 0, 0, dpr, 0, 0), gb.clearRect(0, 0, 850, 580));
+        let bp = batPose(t);
+        lastBatPose = bp;
+        let bj = solve(bp),
+          sh = projB(L(0, 0, 0));
+        ((gb.fillStyle = `#00000045`), gb.beginPath(), gb.ellipse(sh.x, sh.y + 4, 0.75 * sh.s, 0.12 * sh.s, 0, 0, 7), gb.fill());
+        // 스윙 잔상: 최근 배트 위치 몇 개
+        let d = (t - bat.t0) / 1000;
+        bat.state === `swing` && d < 0.3 ? (bat.trail.push([projB(bj.knob), projB(bj.tip)]), bat.trail.length > 6 && bat.trail.shift()) : (bat.trail.length = 0);
+        BAT_STYLE.trail = bat.trail;
+        BAT_STYLE.num = bat.num;
+        drawFigure(gb, bj, projB, BAT_STYLE);
+      };
+    raf = requestAnimationFrame(frame);
+
+    return {
+      batter(state) {
+        ((bat.from = lastBatPose), (bat.state = state), (bat.t0 = clock()), (bat.trail.length = 0));
+      },
+      pitcher(state) {
+        ((pit.state = state), (pit.t0 = clock()));
+      },
+      setHand(h) {
+        bat.hand = h;
+      },
+      setNumber(n) {
+        bat.num = n;
+      },
+      setVisible(v) {
+        visible = v;
+      },
+      pause(p) {
+        p && !paused ? ((paused = !0), (pausedAt = performance.now())) : !p && paused && ((paused = !1), (pausedSum += performance.now() - pausedAt));
+      },
+      // 릴리스 순간 투수의 손 위치 (공이 출발하는 화면 좌표)
+      releasePoint() {
+        let j = solve(PIT.release);
+        return projP(j.bHand);
+      },
+      destroy() {
+        cancelAnimationFrame(raf);
+      },
+    };
+  }
+  return { create };
+})();
 
 // 필드 화면 위치(px)는 sim.js의 실제 치수(m)에서 계산: v = 베이스(0 홈 ~ 4 홈), y = 수비 위치
 var v = Object.fromEntries(BB_BASES.map((b, i) => [i, bbPx(b)])),
@@ -614,6 +1236,37 @@ function bbGenPitch(hard) {
     elapsed: 0,
   };
 }
+// 2P: 수비 플레이어가 고른 구종(1 직구 2 슬라이더 3 커브 4 체인지업)과 코스(3×3, Shift면 존 밖으로)
+// 제구 오차가 있어서 노린 곳에서 조금 벗어날 수 있음
+var BB_PITCHES = [
+  [`직구`, [143, 154], 0, -0.1],
+  [`슬라이더`, [130, 139], -0.9, 0.25],
+  [`커브`, [110, 122], -0.35, 1.1],
+  [`체인지업`, [122, 132], 0.35, 0.6],
+];
+function bbMakePitch(hard, sel) {
+  let [name, spd, bx, by] = BB_PITCHES[sel.type - 1],
+    kmh = Math.round(bbRand(spd[0], spd[1])),
+    [cx, cy] = sel.zone,
+    tx = cx * 0.62,
+    ty = cy * 0.62,
+    g = () => Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random()),
+    spread = hard ? 0.2 : 0.28;
+  sel.out && (cx || cy ? ((tx = cx * 1.45), (ty = cy * 1.45)) : (ty = 1.45)); // 가운데에서 빼면 높은 볼
+  let zx = tx + g() * spread,
+    zy = ty + g() * spread;
+  return {
+    name,
+    kmh,
+    dur: (18440 / (kmh / 3.6)) * (hard ? 1 : 1.18),
+    zx,
+    zy,
+    bx,
+    by,
+    isStrike: Math.abs(zx) <= 1 && Math.abs(zy) <= 1,
+    elapsed: 0,
+  };
+}
 // p: 0(릴리스) → 1(홈플레이트 통과) → 그 뒤는 포수 미트
 function bbDrawBall(el, P, p) {
   if (!el) return;
@@ -676,6 +1329,19 @@ function b() {
       pitchInfo: ``, // 직전 투구 표시 (예: "직구 147km/h · 스트라이크")
       swingFeedback: null, // { text, color }
       swingMiss: !1,
+      mode: `1P`, // 1P(컴퓨터 투구) | 2P(투수 vs 타자)
+      innings: 1,
+      inning: 1,
+      half: `top`, // top(초) | bottom(말)
+      bat: 0, // 공격 팀 (2P: 0 = P1 선공, 1 = P2 후공)
+      teams: [], // { name, lineup, batter, runs, line[] } — 타순·좌우타는 경기 시작 때 확정
+      halfStartScore: 0,
+      halfBreak: null, // 공수 교대 안내
+      endInfo: null, // 2P 경기 결과 { winner, reason, score }
+      play: null, // 진행 중인 타구 플레이 (주루 지시용)
+      awaitPitch: !1, // 2P: 수비 플레이어의 구종·코스 선택 대기
+      pitchSel: { type: null, zone: null, out: !1 },
+      tbRunner: null, // 승부치기 2루 주자 타순
     }),
     s = () =>
       o.current.difficulty === `HARD`
@@ -785,8 +1451,8 @@ function b() {
       (bv.ball && (bv.ball.style.display = `none`),
         bv.marker && (bv.marker.style.display = `none`),
         bv.spark && bv.spark.classList.remove(`on`),
-        bv.batter?.classList.remove(`swing`),
-        bv.pitcher?.classList.remove(`windup`),
+        bv.rig?.batter(`idle`),
+        bv.rig?.pitcher(`idle`),
         (e.pitch = null),
         (e.swingMiss = !1));
     },
@@ -818,12 +1484,103 @@ function b() {
       ne();
       let e = o.current;
       ((e.fieldView = `catcher-view`),
-        (e.playballDisabled = !1),
+        (e.playballDisabled = e.mode === `2P`),
         (e.swingDisabled = !0),
-        (e.statusText = `플레이볼 버튼을 눌러 다음 투구를 지시하세요.`),
+        (e.awaitPitch = e.mode === `2P` && !e.gameOver),
+        (e.pitchSel = { type: null, zone: null, out: !1 }),
+        (e.statusText =
+          e.mode === `2P`
+            ? `${e.teams[1 - e.bat]?.name}(수비): 구종 1~4 · 코스 Q W E / A S D / Z X C (Shift = 볼로 빼기)`
+            : `플레이볼 버튼을 눌러 다음 투구를 지시하세요.`),
         ie(),
         T());
     }, [T]),
+    // ── 2인 모드: 점수·이닝 관리 ──
+    // [P1(선공), P2(후공)] 현재 점수. 공격 중인 팀은 e.totalScore가 최신
+    sc = () => {
+      let e = o.current;
+      if (e.mode !== `2P`) return [e.totalScore, 0];
+      let s2 = e.teams.map((tm) => tm.runs);
+      return ((s2[e.bat] = e.totalScore), s2);
+    },
+    saveHalf = () => {
+      let e = o.current,
+        tm = e.teams[e.bat];
+      tm && ((tm.batter = e.batterNumber), (tm.runs = e.totalScore), (tm.line[e.inning - 1] = e.totalScore - e.halfStartScore));
+    },
+    loadTeam = () => {
+      let e = o.current,
+        tm = e.teams[e.bat];
+      ((e.batterNumber = tm.batter), (e.lineup = tm.lineup), (e.totalScore = tm.runs), (e.halfStartScore = tm.runs));
+    },
+    // 콜드게임(대차 조기 종료): 5·9이닝 경기에서 5회 이상 15점 차, 7회 이상 10점 차
+    mercy = (inn, gap) => {
+      let e = o.current;
+      return (e.innings === 5 || e.innings === 9) && ((inn >= 5 && gap >= 15) || (inn >= 7 && gap >= 10));
+    },
+    endGame2P = (reason) => {
+      let e = o.current;
+      saveHalf();
+      let [aw, hm] = e.teams.map((tm) => tm.runs);
+      return (
+        C(),
+        (e.gameOver = !0),
+        (e.endInfo = { winner: aw === hm ? null : aw > hm ? 0 : 1, reason, score: [aw, hm] }),
+        (e.fieldView = `top-down-view`),
+        (e.statusText = `경기 종료`),
+        (e.play = null),
+        T(),
+        !0
+      );
+    },
+    // 3아웃: 경기가 끝났는지 판단하고, 아니면 공수 교대 안내
+    halfOver = () => {
+      let e = o.current,
+        [aw, hm] = sc(),
+        inn = e.inning,
+        ext = inn > e.innings ? `연장 ${inn}회` : `정규 ${e.innings}이닝`;
+      if (e.half === `top`) {
+        if (inn >= e.innings && hm > aw) return endGame2P(ext); // 후공이 앞서면 말 공격 없이 종료
+        if (mercy(inn, hm - aw)) return endGame2P(`콜드게임 (${inn}회초 종료)`);
+      } else {
+        if (inn >= e.innings && aw !== hm) return endGame2P(ext);
+        if (mercy(inn, Math.abs(aw - hm))) return endGame2P(`콜드게임 (${inn}회말 종료)`);
+      }
+      saveHalf();
+      let nInn = e.half === `top` ? inn : inn + 1,
+        nHalf = e.half === `top` ? `bottom` : `top`,
+        nBat = nHalf === `top` ? 0 : 1;
+      return (
+        (e.halfBreak = {
+          title: `3아웃! 공수 교대`,
+          sub: `${nInn}회${nHalf === `top` ? `초` : `말`} · ${e.teams[nBat].name} 공격 / ${e.teams[1 - nBat].name} 수비`,
+          extra: nInn > e.innings ? `연장 승부치기: 무사 2루에서 시작합니다` : null,
+        }),
+        (e.statusText = `공수 교대`),
+        (e.fieldView = `top-down-view`),
+        (e.play = null),
+        T(),
+        !0
+      );
+    },
+    nextHalf = () => {
+      let e = o.current;
+      if (!e.halfBreak) return;
+      ((e.halfBreak = null), e.half === `top` ? (e.half = `bottom`) : ((e.half = `top`), e.inning++), (e.bat = e.half === `top` ? 0 : 1), loadTeam());
+      ((e.outs = 0), (e.strikes = 0), (e.balls = 0), (e.baseStatus = [!1, !1, !1]), (e.tbRunner = null));
+      // 승부치기: 직전 타순의 타자를 2루 주자로 두고 무사 2루에서 시작
+      e.inning > e.innings && ((e.baseStatus = [!1, !0, !1]), (e.tbRunner = e.batterNumber === 1 ? 9 : e.batterNumber - 1));
+      (re(), ae());
+    },
+    // 후공 팀이 마지막 이닝(연장 포함) 말에 앞서거나 콜드 점수 차가 되면 즉시 종료
+    walkOff = () => {
+      let e = o.current;
+      if (e.mode !== `2P` || e.half !== `bottom` || e.gameOver) return !1;
+      let [aw, hm] = sc();
+      if (e.inning >= e.innings && hm > aw) return endGame2P(e.inning > e.innings ? `연장 ${e.inning}회 끝내기` : `${e.inning}회말 끝내기`);
+      if (mercy(e.inning, hm - aw)) return endGame2P(`콜드게임 (${e.inning}회말)`);
+      return !1;
+    },
     oe = (0, _.useCallback)(() => {
       let e = o.current;
       let kWhy = e.swingMiss ? `헛스윙 삼진` : `루킹 삼진`;
@@ -835,6 +1592,7 @@ function b() {
           E(bbOut(kWhy), `#c0392b`),
           e.hitLog.push({
             batter: e.batterNumber,
+            team: e.bat,
             hitType: kWhy,
             rbis: 0,
             scoreAfter: e.totalScore,
@@ -853,6 +1611,7 @@ function b() {
           E(n ? `밀어내기 볼넷` : `볼넷`, n ? `#f1c40f` : `#2ecc71`),
           e.hitLog.push({
             batter: e.batterNumber,
+            team: e.bat,
             hitType: n ? `밀어내기 볼넷` : `볼넷`,
             rbis: r,
             scoreAfter: e.totalScore,
@@ -860,17 +1619,11 @@ function b() {
           }),
           l());
       }
-      return (
-        ee(),
-        e.outs >= 3
-          ? (C(),
-            (e.statusText = `3아웃 경기 종료`),
-            (e.gameOver = !0),
-            (e.fieldView = `top-down-view`),
-            T(),
-            !0)
-          : (T(), !1)
-      );
+      if ((ee(), e.outs >= 3)) {
+        if (e.mode === `2P`) return halfOver();
+        return (C(), (e.statusText = `3아웃 경기 종료`), (e.gameOver = !0), (e.fieldView = `top-down-view`), T(), !0);
+      }
+      return walkOff() || (T(), !1);
     }, [C, T, E]),
     // 5초 절대판정: 플레이가 5초를 넘으면 미리 계산된 결과로 즉시 확정
     k = (0, _.useCallback)(() => {
@@ -890,14 +1643,14 @@ function b() {
         ee(),
         oe() || ae());
     }, [ae, oe, E]),
-    // 타구 진행: sim.js가 계산한 플레이(공·수비·주자 궤적)를 2.2배속으로 재생한 뒤 결과 반영
+    // 타구 진행: sim.js의 플레이를 2배속으로 실시간 진행. 그동안 주자에게 진루/귀루 지시 가능.
+    // 5초가 지나면(5초 절대판정) 나머지는 즉시 계산해 결과 확정
     pb = (bb) => {
       let e = o.current,
-        sim = BB_SIM.play(bb, { bases: [...e.baseStatus], outs: e.outs, diff: e.difficulty }),
+        P = BB_SIM.start(bb, { bases: [...e.baseStatus], outs: e.outs, diff: e.difficulty }),
         ball = t.current,
         shadow = i.current.__shadow,
-        SPEED = 2.2,
-        elapsed = 0,
+        SPEED = 2,
         last = performance.now(),
         lastHud = 0,
         place = (el, x, yy) => {
@@ -905,26 +1658,21 @@ function b() {
           let q = bbPx({ x, y: yy });
           ((el.style.bottom = q.bottom + `px`), (el.style.left = q.left + `%`));
         },
-        draw = (tt) => {
-          let b = BB_SIM.sample(sim.ball, tt);
-          b &&
-            (place(ball, b[1], b[2]),
-            place(shadow, b[1], b[2]),
-            ball && (ball.style.transform = `translateX(-50%) translateZ(${(b[3] || 0) * BB_K}px) rotateX(-90deg)`),
-            !sim.foul &&
+        draw = () => {
+          let vw = P.view(),
+            b = vw.ball;
+          (place(ball, b.x, b.y),
+            place(shadow, b.x, b.y),
+            ball && (ball.style.transform = `translateX(-50%) translateZ(${b.h * BB_K}px) rotateX(-90deg)`),
+            !P.foul &&
               bb.kind !== `ground` &&
-              sim.distance != null &&
-              (e.distanceText = `${Math.round(Math.min(sim.distance, Math.hypot(b[1], b[2])))} m`));
-          for (let key in sim.fielders) {
-            let fp = BB_SIM.sample(sim.fielders[key], tt);
-            place(i.current[key], fp[1], fp[2]);
-          }
-          for (let id in sim.runners) {
-            let rp = BB_SIM.sample(sim.runners[id], tt),
-              el = a.current[id];
-            el &&
-              ((el.style.display = sim.hideAt[id] != null && tt >= sim.hideAt[id] ? `none` : `flex`),
-              place(el, rp[1], rp[2]));
+              P.distance != null &&
+              !P.possessed &&
+              (e.distanceText = `${Math.round(Math.min(P.distance, Math.hypot(b.x, b.y)))} m`));
+          for (let key in vw.fielders) place(i.current[key], vw.fielders[key].x, vw.fielders[key].y);
+          for (let rr of vw.runners) {
+            let el = a.current[rr.id];
+            el && ((el.style.display = rr.visible ? `flex` : `none`), el.classList.toggle(`manual`, !!rr.manual), place(el, rr.x, rr.y));
           }
         },
         next = (ms) =>
@@ -932,7 +1680,10 @@ function b() {
             (re(), (e.fieldView = `top-down-view`), T(), oe() || S(ae, 400));
           }, ms),
         finish = (fromRule) => {
-          ((d.current &&= (clearInterval(d.current), null)), draw(sim.dur));
+          ((d.current &&= (clearInterval(d.current), null)), fromRule && P.runToEnd(), draw());
+          let sim = P.result();
+          e.play = null;
+          for (let id of [`runner-t`, `runner-1`, `runner-2`, `runner-3`]) a.current[id]?.classList.remove(`manual`);
           if (sim.foul && !sim.foulOut) {
             (e.strikes < 2 && e.strikes++, E(`FOUL`, `#e67e22`), (e.statusText = `파울!`), T());
             fromRule || next(700);
@@ -948,6 +1699,7 @@ function b() {
             sim.distance != null && (e.distanceText = `${sim.distance} m`),
             e.hitLog.push({
               batter: e.batterNumber,
+              team: e.bat,
               hitType: sim.label,
               rbis: sim.runs,
               scoreAfter: e.totalScore,
@@ -955,38 +1707,21 @@ function b() {
             }),
             l(),
             T());
-          if (fromRule) return;
-          // 뜬공 아웃 + 주자 + 3아웃 전 → 태그업할 주자 선택 (3.5초)
-          if (sim.caught && bb.kind === `fly` && e.outs < 3 && e.baseStatus.some(Boolean)) {
-            ((e.sacFlyThrowerPos = bbPx(sim.caught.p)),
-              (e.sacFlyCatch = sim.caught.p),
-              (e.stealWindow = !0),
-              (e.statusText = `${sim.status} · 태그업할 주자를 눌러주세요`),
-              ie(),
-              T(),
-              S(() => {
-                e.sacFlyThrowerPos &&
-                  ((e.sacFlyThrowerPos = null),
-                  (e.stealWindow = !1),
-                  re(),
-                  (e.fieldView = `top-down-view`),
-                  T(),
-                  oe() || ae());
-              }, 3500));
-            return;
-          }
-          next(1500);
+          fromRule || next(1500);
         };
       ((e.stealWindow = !1),
         (e.fieldView = `top-down-view`),
         (e.statusText = bb.foul
           ? `파울 타구`
-          : { ground: `땅볼 타구!`, line: `라인드라이브!`, fly: `큰 타구!`, pop: `높이 뜬 타구` }[bb.kind]),
+          : P.homeRun
+            ? `큰 타구! 넘어가나…`
+            : `${{ ground: `땅볼 타구!`, line: `라인드라이브!`, fly: `큰 타구!`, pop: `높이 뜬 타구` }[bb.kind]} → 진루 / ← 귀루`),
         (e.distanceText = `-`),
         te(),
         ball && ((ball.style.display = `block`), (ball.style.width = ball.style.height = `8px`)),
         shadow && (shadow.style.display = `block`),
-        draw(0),
+        draw(),
+        (e.play = bb.foul || P.homeRun ? null : P),
         (e.pendingOutcome = { processed: !1, resolve: finish }),
         (g.current = Date.now()),
         (m.current = setTimeout(() => {
@@ -999,9 +1734,9 @@ function b() {
             last = now;
             return;
           }
-          ((elapsed += ((now - last) / 1e3) * SPEED), (last = now), draw(Math.min(elapsed, sim.dur)));
+          (P.step(((now - last) / 1e3) * SPEED), (last = now), draw());
           now - lastHud > 120 && ((lastHud = now), T());
-          elapsed >= sim.dur &&
+          P.done &&
             ((m.current &&= (clearTimeout(m.current), null)),
             e.pendingOutcome.processed || ((e.pendingOutcome.processed = !0), finish(!1)));
         }, 16)));
@@ -1010,7 +1745,8 @@ function b() {
     fe = () => {
       let e = o.current,
         P = e.pitch;
-      ((e.stealWindow = !1),
+      (e.swingMiss || bvRef.current.rig?.batter(`take`),
+        (e.stealWindow = !1),
         (e.isSwung = !0),
         (e.swingDisabled = !0),
         (e.pitchTarget = null),
@@ -1043,22 +1779,27 @@ function b() {
         (e.swingFeedback = null),
         (e.pitchInfo = ``),
         (e.distanceText = `-`));
-      let P = bbGenPitch(e.difficulty === `HARD`);
+      let P =
+        e.mode === `2P` && e.pitchSel.type
+          ? bbMakePitch(e.difficulty === `HARD`, e.pitchSel)
+          : bbGenPitch(e.difficulty === `HARD`);
+      ((e.awaitPitch = !1), (e.pitchSel = { type: null, zone: null, out: !1 }), bvRef.current.rig?.pitcher(`windup`));
       ((e.pitch = P),
         (e.pitchType = P.isStrike ? `strike` : `ball`),
         T(),
         n.current?.classList.add(`windup`),
-        bvRef.current.pitcher?.classList.add(`windup`),
         (e.windupTimer = S(() => {
           ((e.windupTimer = null), (e.swingDisabled = !1));
           let bv = bvRef.current,
             last = performance.now(),
             // 스윙 가능한 마지막 시점이 지나면 판정
             endAt = P.dur + bbSwingWindow(e.difficulty) + 40;
-          (bv.pitcher?.classList.remove(`windup`),
-            bv.ball && (bv.ball.style.display = `block`),
+          (bv.ball && (bv.ball.style.display = `block`),
+            bv.rig?.pitcher(`release`),
+            bv.rig?.batter(`load`),
             bv.marker &&
               e.difficulty === `EASY` &&
+              e.mode !== `2P` &&
               ((bv.marker.style.display = `block`),
               (bv.marker.style.left = bbPlateX(P.zx) + `px`),
               (bv.marker.style.top = bbPlateY(P.zy) + `px`)),
@@ -1088,7 +1829,7 @@ function b() {
       if (!e.isPitched || e.isSwung || e.swingDisabled || e.gameOver || !P) return;
       ((e.isSwung = !0), (e.swingDisabled = !0), (e.stealWindow = !1));
       let bv = bvRef.current;
-      (bv.batter?.classList.add(`swing`),
+      (bv.rig?.batter(`swing`),
         r.current?.classList.add(`swing`),
         S(() => r.current?.classList.remove(`swing`), 150));
       let win = bbSwingWindow(e.difficulty),
@@ -1168,6 +1909,19 @@ function b() {
         (e.swingMiss = !1),
         (e.windupTimer = null),
         (e.sacFlyCatch = null),
+        (e.mode = `1P`),
+        (e.innings = 1),
+        (e.inning = 1),
+        (e.half = `top`),
+        (e.bat = 0),
+        (e.teams = []),
+        (e.halfStartScore = 0),
+        (e.halfBreak = null),
+        (e.endInfo = null),
+        (e.play = null),
+        (e.awaitPitch = !1),
+        (e.pitchSel = { type: null, zone: null, out: !1 }),
+        (e.tbRunner = null),
         (e.difficulty = null),
         (e.statusText = `난이도를 선택하고 플레이볼을 눌러주세요`),
         D(),
@@ -1265,6 +2019,7 @@ function b() {
                       : `${e}루 → ${g}루 도루 실패, 송구 아웃`),
                   n.hitLog.push({
                     batter: n.batterNumber,
+                    team: n.bat,
                     hitType: m
                       ? `${e}루 주자 태그업 실패`
                       : g === 4
@@ -1282,6 +2037,7 @@ function b() {
                     (n.statusText = m ? `3루 주자 태그업, 홈인 (득점)` : `3루 주자 홈스틸 성공 (득점)`),
                     n.hitLog.push({
                       batter: n.batterNumber,
+                      team: n.bat,
                       hitType: m ? `태그업 득점 (희생플라이)` : `홈스틸 성공`,
                       rbis: 1,
                       scoreAfter: n.totalScore,
@@ -1294,6 +2050,7 @@ function b() {
                     (n.statusText = `${e}루 주자 → ${g}루 ${m ? `태그업 진루` : `도루 성공`}`),
                     n.hitLog.push({
                       batter: n.batterNumber,
+                      team: n.bat,
                       hitType: `${e}루 → ${g}루 ${m ? `태그업 진루` : `도루 성공`}`,
                       rbis: 0,
                       scoreAfter: n.totalScore,
@@ -1314,7 +2071,7 @@ function b() {
     _e = (0, _.useCallback)(() => {
       let e = o.current;
       if (!(e.gameOver || e.paused)) {
-        if (((e.paused = !0), m.current)) {
+        if ((bvRef.current.rig?.pause(!0), (e.paused = !0), m.current)) {
           let e = Date.now() - g.current;
           ((h.current = Math.max(0, 5e3 - e)),
             clearTimeout(m.current),
@@ -1327,7 +2084,8 @@ function b() {
       let e = o.current;
       if (e.paused) {
         if (
-          ((e.paused = !1),
+          (bvRef.current.rig?.pause(!1),
+          (e.paused = !1),
           h.current !== null && e.pendingOutcome && !e.pendingOutcome.processed)
         ) {
           g.current = Date.now();
@@ -1340,8 +2098,26 @@ function b() {
       }
     }, [T, k]);
   (0, _.useEffect)(() => {
+    let PITCH_KEYS = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Numpad1: 1, Numpad2: 2, Numpad3: 3, Numpad4: 4 },
+      ZONE_KEYS = { KeyQ: [-1, 1], KeyW: [0, 1], KeyE: [1, 1], KeyA: [-1, 0], KeyS: [0, 0], KeyD: [1, 0], KeyZ: [-1, -1], KeyX: [0, -1], KeyC: [1, -1] };
     let e = (e) => {
       let s = o.current;
+      if (s.halfBreak && e.code === `Enter`) return (e.preventDefault(), nextHalf());
+      // 2P 수비: 구종·코스 선택 (무엇을 골랐는지는 화면에 보이지 않음)
+      if (s.mode === `2P` && s.awaitPitch && !s.paused && !s.halfBreak && !s.gameOver && (e.code in PITCH_KEYS || e.code in ZONE_KEYS)) {
+        (e.preventDefault(),
+          e.code in PITCH_KEYS
+            ? (s.pitchSel.type = PITCH_KEYS[e.code])
+            : ((s.pitchSel.zone = ZONE_KEYS[e.code]), (s.pitchSel.out = e.shiftKey)));
+        s.pitchSel.type && s.pitchSel.zone && ((s.awaitPitch = !1), (s.statusText = `투구 준비 완료!`), S(A, 600));
+        T();
+        return;
+      }
+      // 주루 지시: → 전원 진루, ← 전원 귀루
+      if (s.play && !s.paused && (e.code === `ArrowRight` || e.code === `ArrowLeft`)) {
+        (e.preventDefault(), s.play.commandAll(e.code === `ArrowRight` ? `advance` : `return`), T());
+        return;
+      }
       (e.code === `Space` &&
         !s.swingDisabled &&
         !s.paused &&
@@ -1359,12 +2135,25 @@ function b() {
       window.addEventListener(`keydown`, e),
       () => window.removeEventListener(`keydown`, e)
     );
-  }, [pe, A, _e, ve]);
+  }, [pe, A, _e, ve, S, T]);
+  // 경기 시작: { mode: 1P|2P, diff: EASY|HARD, innings }. 타순별 좌/우타는 여기서 확정되어 경기 내내 유지
   let ye = (0, _.useCallback)(
-    (e) => {
-      let t = o.current;
-      ((t.difficulty = e),
-        t.gameOver || (t.statusText = `${e} 모드 · 플레이볼 버튼을 눌러주세요`),
+    (cfg) => {
+      let t = o.current,
+        team = (name) => ({ name, lineup: bbLineup(), batter: 1, runs: 0, line: [] });
+      ((t.mode = cfg.mode),
+        (t.difficulty = cfg.diff),
+        (t.innings = cfg.mode === `2P` ? cfg.innings : 1),
+        (t.inning = 1),
+        (t.half = `top`),
+        (t.bat = 0),
+        (t.endInfo = null),
+        (t.halfBreak = null),
+        (t.hitLog = []),
+        (t.teams = cfg.mode === `2P` ? [team(`P1`), team(`P2`)] : [team(`나`)]),
+        loadTeam(),
+        (t.statusText = `${cfg.diff} 모드 · 플레이볼 버튼을 눌러주세요`),
+        cfg.mode === `2P` && ae(),
         T());
     },
     [T],
@@ -1403,6 +2192,33 @@ function b() {
       batterHand: j.lineup[j.batterNumber - 1],
       difficulty: j.difficulty,
       pitchTarget: j.pitchTarget,
+      mode: j.mode,
+      inning: j.inning,
+      half: j.half,
+      innings: j.innings,
+      bat: j.bat,
+      teams: j.teams.map((tm, k) => ({ ...tm, runs: sc()[k] ?? tm.runs, line: [...tm.line] })),
+      lineup: j.lineup,
+      halfBreak: j.halfBreak,
+      halfRuns: j.totalScore - j.halfStartScore,
+      endInfo: j.endInfo,
+      awaitPitch: j.awaitPitch,
+      pitchSel: { type: !!j.pitchSel.type, zone: !!j.pitchSel.zone },
+      tbRunner: j.tbRunner,
+      // 주루 지시 패널: 살아있는 주자별 가능 여부
+      runCtl:
+        j.play && !j.play.done
+          ? j.play.r
+              .filter((r) => j.play.live(r.id))
+              .map((r) => ({
+                id: r.id,
+                name: r.id === `runner-t` ? `타자주자` : `${r.from}루 주자`,
+                where: r.target >= 4 ? `홈` : r.target > 0 ? `${r.target}루` : `-`,
+                canA: j.play.can(r.id, `advance`),
+                canR: j.play.can(r.id, `return`),
+                manual: r.manual,
+              }))
+          : null,
     },
     actions: {
       playball: A,
@@ -1412,6 +2228,11 @@ function b() {
       pauseGame: _e,
       resumeGame: ve,
       setDifficulty: ye,
+      nextHalf,
+      runCmd: (id, cmd) => {
+        let P = o.current.play;
+        (P && (id === `all` ? P.commandAll(cmd) : P.command(id, cmd)), T());
+      },
     },
   };
 }
@@ -1438,6 +2259,7 @@ var x = o((e) => {
     t.exports = x();
   })(),
   C = [
+    `pitcher`,
     `inf-1b`,
     `inf-2b`,
     `inf-ss`,
@@ -1448,6 +2270,7 @@ var x = o((e) => {
     `catcher`,
   ],
   w = {
+    pitcher: `P`,
     "inf-1b": `1B`,
     "inf-2b": `2B`,
     "inf-ss": `SS`,
@@ -1484,18 +2307,6 @@ function T({ refs: e, fieldView: t, pitchTarget: n, children: r }) {
           className: `bb-pitch-target`,
           style: { left: `${n}%` },
         }),
-      (0, S.jsxs)(`div`, {
-        ref: o,
-        className: `bb-pitcher`,
-        style: { bottom: bbPx(BB_MOUND).bottom + `px` },
-        children: [
-          (0, S.jsx)(`div`, { className: `bb-head` }),
-          (0, S.jsx)(`div`, {
-            className: `bb-torso`,
-            children: (0, S.jsx)(`div`, { className: `bb-pitcher-arm` }),
-          }),
-        ],
-      }),
       C.map((e) =>
         (0, S.jsx)(
           `div`,
@@ -1528,15 +2339,6 @@ function T({ refs: e, fieldView: t, pitchTarget: n, children: r }) {
           e.id,
         ),
       ),
-      (0, S.jsxs)(`div`, {
-        ref: s,
-        className: `bb-batter`,
-        children: [
-          (0, S.jsx)(`div`, { className: `bb-head` }),
-          (0, S.jsx)(`div`, { className: `bb-torso` }),
-          (0, S.jsx)(`div`, { className: `bb-batter-bat` }),
-        ],
-      }),
       (0, S.jsx)(`div`, { ref: a, className: `bb-ball` }),
       r,
     ],
@@ -1574,23 +2376,51 @@ function ee({
   outs: o,
   batterNumber: s,
   batterHand: bh,
+  mode,
+  teams,
+  inning,
+  half,
+  bat,
+  tbRunner,
 }) {
+  let two = mode === `2P`;
   return (0, S.jsxs)(S.Fragment, {
     children: [
-      (0, S.jsxs)(`div`, {
-        className: `bb-score-topright`,
-        "aria-label": `현재 득점`,
-        children: [
-          (0, S.jsx)(`div`, { className: `bb-score-label`, children: `SCORE` }),
-          (0, S.jsxs)(`div`, {
-            className: `bb-score-value`,
+      two
+        ? (0, S.jsxs)(`div`, {
+            className: `bb-score-topright bb-sb2`,
+            "aria-label": `점수판`,
             children: [
-              r,
-              (0, S.jsx)(`span`, { className: `bb-score-unit`, children: `R` }),
+              (0, S.jsx)(`div`, { className: `bb-score-label`, children: `${inning}회${half === `top` ? `초 ▲` : `말 ▼`}` }),
+              ...teams.map((tm, k) =>
+                (0, S.jsxs)(
+                  `div`,
+                  {
+                    className: `bb-sb2-row${k === bat ? ` batting` : ``}`,
+                    children: [
+                      (0, S.jsx)(`span`, { children: (k === bat ? `▶ ` : ``) + tm.name }),
+                      (0, S.jsx)(`b`, { children: tm.runs }),
+                    ],
+                  },
+                  k,
+                ),
+              ),
+            ],
+          })
+        : (0, S.jsxs)(`div`, {
+            className: `bb-score-topright`,
+            "aria-label": `현재 득점`,
+            children: [
+              (0, S.jsx)(`div`, { className: `bb-score-label`, children: `SCORE` }),
+              (0, S.jsxs)(`div`, {
+                className: `bb-score-value`,
+                children: [
+                  r,
+                  (0, S.jsx)(`span`, { className: `bb-score-unit`, children: `R` }),
+                ],
+              }),
             ],
           }),
-        ],
-      }),
       (0, S.jsxs)(`div`, {
         className: `bb-hud`,
         children: [
@@ -1605,7 +2435,7 @@ function ee({
               `타석: `,
               (0, S.jsxs)(`span`, {
                 className: `bb-batter-num`,
-                children: [s, `번 타자 (${bh === `R` ? `우타` : `좌타`})`],
+                children: [two ? `${teams[bat]?.name} · ` : ``, s, `번 타자 (${bh === `R` ? `우타` : `좌타`})`, tbRunner ? ` · 승부치기 2루 주자 ${tbRunner}번` : ``],
               }),
             ],
           }),
@@ -1680,7 +2510,17 @@ function te({ text: e, color: t, visible: n }) {
       })
     : null;
 }
-function ne({ visible: e, finalScore: t, onRestart: n }) {
+function ne({ visible: e, finalScore: t, onRestart: n, mode, endInfo, teams, innings, inning, half }) {
+  if (e && mode === `2P` && endInfo)
+    return (0, S.jsxs)(`div`, {
+      className: `bb-game-over`,
+      children: [
+        (0, S.jsx)(`h2`, { children: endInfo.winner == null ? `무승부` : `${teams[endInfo.winner].name} 승리!` }),
+        (0, S.jsx)(`p`, { className: `bb-end-score`, children: `${teams[0].name} ${endInfo.score[0]} : ${endInfo.score[1]} ${teams[1].name} · ${endInfo.reason}` }),
+        (0, S.jsx)(LineScore, { teams, innings, inning, half, final: !0 }),
+        (0, S.jsx)(`button`, { className: `bb-btn bb-btn-restart`, onClick: n, children: `메인 화면으로` }),
+      ],
+    });
   return e
     ? (0, S.jsxs)(`div`, {
         className: `bb-game-over`,
@@ -1697,6 +2537,121 @@ function ne({ visible: e, finalScore: t, onRestart: n }) {
             className: `bb-btn bb-btn-restart`,
             onClick: n,
             children: `다시 도전하겠습니까?`,
+          }),
+        ],
+      })
+    : null;
+}
+// 이닝별 점수표
+function LineScore({ teams, innings, inning, half, halfRuns, bat, final: fin }) {
+  let n = Math.max(innings, inning),
+    cols = Array.from({ length: n }, (_x, k) => k + 1);
+  return (0, S.jsxs)(`table`, {
+    className: `bb-linescore`,
+    children: [
+      (0, S.jsx)(`thead`, {
+        children: (0, S.jsxs)(`tr`, {
+          children: [(0, S.jsx)(`th`, {}), ...cols.map((c) => (0, S.jsx)(`th`, { className: c > innings ? `ext` : ``, children: c }, c)), (0, S.jsx)(`th`, { children: `R` })],
+        }),
+      }),
+      (0, S.jsx)(`tbody`, {
+        children: teams.map((tm, k) =>
+          (0, S.jsxs)(
+            `tr`,
+            {
+              children: [
+                (0, S.jsx)(`td`, { className: `name`, children: tm.name }),
+                ...cols.map((c) => {
+                  let v = tm.line[c - 1];
+                  // 진행 중인 이닝(공격 중)은 지금까지의 점수
+                  !fin && v == null && c === inning && k === bat && halfRuns != null && (v = halfRuns);
+                  return (0, S.jsx)(`td`, { children: v ?? `` }, c);
+                }),
+                (0, S.jsx)(`td`, { className: `runs`, children: tm.runs }),
+              ],
+            },
+            k,
+          ),
+        ),
+      }),
+    ],
+  });
+}
+// 타순표: 1~9번 좌/우타 (경기 시작 때 확정)
+function LineupCard({ team, current }) {
+  return (0, S.jsxs)(`div`, {
+    className: `bb-lineup`,
+    children: [
+      (0, S.jsx)(`span`, { className: `bb-lineup-name`, children: team.name }),
+      ...team.lineup.map((h, k) =>
+        (0, S.jsxs)(`span`, { className: `bb-lineup-chip${k + 1 === current ? ` now` : ``} ${h}`, children: [k + 1, h === `R` ? `우` : `좌`] }, k),
+      ),
+    ],
+  });
+}
+// 2P 공수 교대 안내
+function HalfBreak({ info, teams, innings, inning, half, onNext }) {
+  return info
+    ? (0, S.jsxs)(`div`, {
+        className: `bb-game-over bb-halfbreak`,
+        children: [
+          (0, S.jsx)(`h2`, { children: info.title }),
+          (0, S.jsx)(`p`, { children: info.sub }),
+          info.extra && (0, S.jsx)(`p`, { className: `bb-halfbreak-extra`, children: info.extra }),
+          (0, S.jsx)(LineScore, { teams, innings, inning, half, final: !0 }),
+          (0, S.jsx)(`p`, { className: `bb-halfbreak-tip`, children: `수비 플레이어는 키보드 왼쪽(1~4, Q~C)을, 공격 플레이어는 Space와 ← → 키를 씁니다.` }),
+          (0, S.jsx)(`button`, { className: `bb-btn bb-btn-restart`, onClick: onNext, children: `다음 이닝 시작 ▶ (Enter)` }),
+        ],
+      })
+    : null;
+}
+// 타구 진행 중 주루 지시
+function RunCtl({ ctl, onCmd }) {
+  return ctl && ctl.length
+    ? (0, S.jsxs)(`div`, {
+        className: `bb-runctl`,
+        children: [
+          (0, S.jsxs)(`div`, {
+            className: `bb-runctl-head`,
+            children: [
+              (0, S.jsx)(`span`, { children: `주루 지시` }),
+              (0, S.jsx)(`button`, { onClick: () => onCmd(`all`, `return`), children: `◀ 전원 귀루` }),
+              (0, S.jsx)(`button`, { onClick: () => onCmd(`all`, `advance`), children: `전원 진루 ▶` }),
+            ],
+          }),
+          ...ctl.map((r) =>
+            (0, S.jsxs)(
+              `div`,
+              {
+                className: `bb-runctl-row${r.manual ? ` manual` : ``}`,
+                children: [
+                  (0, S.jsx)(`span`, { className: `bb-runctl-name`, children: `${r.name} → ${r.where}` }),
+                  (0, S.jsx)(`button`, { disabled: !r.canR, onClick: () => onCmd(r.id, `return`), title: `마지막으로 밟은 베이스로 귀루`, children: `◀ 귀루` }),
+                  (0, S.jsx)(`button`, { disabled: !r.canA, onClick: () => onCmd(r.id, `advance`), title: `한 베이스 더 진루`, children: `진루 ▶` }),
+                ],
+              },
+              r.id,
+            ),
+          ),
+        ],
+      })
+    : null;
+}
+// 2P: 수비 플레이어의 구종·코스 선택 안내 (고른 내용은 보이지 않음)
+function PitchPrompt({ show, sel, defName, batName }) {
+  return show
+    ? (0, S.jsxs)(`div`, {
+        className: `bb-pitchprompt`,
+        children: [
+          (0, S.jsx)(`div`, { className: `bb-pitchprompt-title`, children: `${defName} 수비 차례 — ${batName}은(는) 화면만 보세요` }),
+          (0, S.jsx)(`div`, { children: `구종  1 직구 · 2 슬라이더 · 3 커브 · 4 체인지업` }),
+          (0, S.jsx)(`div`, { children: `코스  Q W E / A S D / Z X C  (Shift를 누른 채: 존 밖으로 빼기)` }),
+          (0, S.jsxs)(`div`, {
+            className: `bb-pitchprompt-state`,
+            children: [
+              (0, S.jsx)(`span`, { className: sel.type ? `ok` : ``, children: sel.type ? `구종 ✓` : `구종 …` }),
+              (0, S.jsx)(`span`, { className: sel.zone ? `ok` : ``, children: sel.zone ? `코스 ✓` : `코스 …` }),
+            ],
           }),
         ],
       })
@@ -1742,6 +2697,14 @@ function ae({
   hitLog: o,
   onResume: s,
   onQuit: quit,
+  mode,
+  teams,
+  innings,
+  inning,
+  half,
+  bat,
+  halfRuns,
+  batterNumber,
 }) {
   // 메인 화면으로 가기 전 한 번 더 확인 (실수로 눌러 경기가 사라지지 않도록)
   let [confirm, setConfirm] = (0, _.useState)(!1);
@@ -1835,6 +2798,9 @@ function ae({
             (0, S.jsx)(`span`, { className: `bb-pause-value`, children: c }),
           ],
         }),
+        mode === `2P` && (0, S.jsx)(LineScore, { teams, innings, inning, half, halfRuns, bat }),
+        (0, S.jsx)(`div`, { className: `bb-pause-hitlog-title`, children: `타순 (경기 내내 고정)` }),
+        ...(teams || []).map((tm, k) => (0, S.jsx)(LineupCard, { team: tm, current: k === bat ? batterNumber : null }, k)),
         (0, S.jsx)(`div`, {
           className: `bb-pause-hitlog-title`,
           children: `타자 기록`,
@@ -1857,7 +2823,7 @@ function ae({
                       children: [
                         (0, S.jsxs)(`span`, {
                           className: `bb-pause-hitlog-batter`,
-                          children: [e.batter, `번`],
+                          children: [mode === `2P` && teams[e.team] ? `${teams[e.team].name} ` : ``, e.batter, `번`],
                         }),
                         (0, S.jsx)(`span`, {
                           className: `bb-pause-hitlog-type`,
@@ -1892,50 +2858,56 @@ function ae({
   });
 }
 function oe({ visible: e, onSelect: t }) {
-  return e
-    ? (0, S.jsx)(`div`, {
-        className: `bb-pause-overlay`,
-        role: `dialog`,
-        "aria-modal": `true`,
-        "aria-label": `난이도 선택`,
-        children: (0, S.jsxs)(`div`, {
-          className: `bb-pause-card`,
-          children: [
-            (0, S.jsx)(`div`, { className: `bb-main-title`, children: `⚾ 5초 절대판정 베이스볼` }),
-            (0, S.jsx)(`h3`, {
-              className: `bb-pause-title`,
-              children: `난이도 선택`,
-            }),
-            (0, S.jsx)(`p`, {
-              style: { fontSize: 13, color: `#bbb`, margin: `4px 0 14px` },
-              children: `타격 타이밍 범위, 구속과 구종, 수비·송구 속도, 도루 성공률, 실책 확률이 달라집니다.`,
-            }),
-            (0, S.jsxs)(`div`, {
-              style: { display: `flex`, flexDirection: `column`, gap: 10 },
-              children: [
-                (0, S.jsx)(`button`, {
-                  className: `bb-btn bb-btn-playball`,
-                  style: { padding: `12px 16px`, fontSize: 15 },
-                  onClick: () => t(`EASY`),
-                  children: `🟢 EASY`,
-                }),
-                (0, S.jsx)(`button`, {
-                  className: `bb-btn`,
-                  style: {
-                    padding: `12px 16px`,
-                    fontSize: 15,
-                    background: `#c0392b`,
-                    color: `#fff`,
-                  },
-                  onClick: () => t(`HARD`),
-                  children: `🔴 HARD`,
-                }),
-              ],
-            }),
-          ],
-        }),
-      })
-    : null;
+  let [step, setStep] = (0, _.useState)(`mode`),
+    [cfg, setCfg] = (0, _.useState)({});
+  (0, _.useEffect)(() => {
+    e && (setStep(`mode`), setCfg({}));
+  }, [e]);
+  if (!e) return null;
+  let big = { padding: `12px 16px`, fontSize: 15, textAlign: `left` },
+    pick = (k, v) => {
+      let c2 = { ...cfg, [k]: v };
+      setCfg(c2);
+      k === `mode` ? setStep(`diff`) : k === `diff` ? (c2.mode === `2P` ? setStep(`innings`) : t(c2)) : t(c2);
+    },
+    back = (to) => (0, S.jsx)(`button`, { className: `bb-btn bb-btn-home`, style: { padding: `8px 12px`, fontSize: 13 }, onClick: () => setStep(to), children: `◀ 뒤로` }),
+    body =
+      step === `mode`
+        ? [
+            (0, S.jsx)(`h3`, { className: `bb-pause-title`, children: `게임 모드` }, `h`),
+            (0, S.jsx)(`button`, { className: `bb-btn bb-btn-playball`, style: big, onClick: () => pick(`mode`, `1P`), children: `👤 1인 플레이 — 컴퓨터가 던지는 공을 칩니다 (3아웃 단판)` }, `a`),
+            (0, S.jsx)(`button`, { className: `bb-btn bb-btn-swing`, style: big, onClick: () => pick(`mode`, `2P`), children: `👥 2인 대결 — 한 명은 투수, 한 명은 타자 (이닝마다 공수 교대)` }, `b`),
+          ]
+        : step === `diff`
+          ? [
+              (0, S.jsx)(`h3`, { className: `bb-pause-title`, children: `난이도` }, `h`),
+              (0, S.jsx)(`p`, { style: { fontSize: 13, color: `#bbb`, margin: `0 0 6px` }, children: `타격 타이밍 범위, 구속, 수비·송구 속도, 도루 성공률, 실책 확률이 달라집니다.` }, `p`),
+              (0, S.jsx)(`button`, { className: `bb-btn bb-btn-playball`, style: big, onClick: () => pick(`diff`, `EASY`), children: `🟢 EASY` }, `a`),
+              (0, S.jsx)(`button`, { className: `bb-btn`, style: { ...big, background: `#c0392b`, color: `#fff` }, onClick: () => pick(`diff`, `HARD`), children: `🔴 HARD` }, `b`),
+              back(`mode`),
+            ]
+          : [
+              (0, S.jsx)(`h3`, { className: `bb-pause-title`, children: `경기 이닝` }, `h`),
+              (0, S.jsx)(`p`, { style: { fontSize: 13, color: `#bbb`, margin: `0 0 6px`, lineHeight: 1.6 }, children: `동점이면 연장 승부치기(직전 타순 타자가 2루 주자, 무사 2루). 5·9이닝은 콜드게임 적용: 5회 이후 15점 차, 7회 이후 10점 차.` }, `p`),
+              (0, S.jsx)(`div`, {
+                className: `bb-innings-pick`,
+                children: [1, 3, 5, 9].map((n) => (0, S.jsx)(`button`, { className: `bb-btn bb-btn-playball`, onClick: () => pick(`innings`, n), children: `${n}이닝` }, n)),
+              }, `g`),
+              back(`diff`),
+            ];
+  return (0, S.jsx)(`div`, {
+    className: `bb-pause-overlay`,
+    role: `dialog`,
+    "aria-modal": `true`,
+    "aria-label": `메인 화면`,
+    children: (0, S.jsxs)(`div`, {
+      className: `bb-pause-card`,
+      children: [
+        (0, S.jsx)(`div`, { className: `bb-main-title`, children: `⚾ 5초 절대판정 베이스볼` }),
+        (0, S.jsx)(`div`, { style: { display: `flex`, flexDirection: `column`, gap: 10 }, children: body }),
+      ],
+    }),
+  });
 }
 // ── 포수 뒤 타격 시점 (구장 배경은 정적 SVG, 공·마커·타자는 훅에서 직접 DOM 갱신) ──
 var BB_SCENE = (() => {
@@ -2007,10 +2979,27 @@ function BatView({
   onSwing: i,
   batterNumber: num,
   batterHand: hand,
+  mode,
 }) {
   let reg = (k) => (el) => {
-    e.current[k] = el;
-  };
+      e.current[k] = el;
+    },
+    cvP = (0, _.useRef)(null),
+    cvB = (0, _.useRef)(null);
+  // 타자·투수 동작(rig.js): 캔버스 두 장 — 투수는 존·공보다 뒤, 타자는 앞
+  (0, _.useEffect)(() => {
+    let rig = BB_RIG.create(cvP.current, cvB.current),
+      rp = rig.releasePoint();
+    ((BB_REL.x = rp.x), (BB_REL.y = rp.y), (e.current.rig = rig));
+    return () => (rig.destroy(), e.current.rig === rig && (e.current.rig = null));
+  }, []);
+  (0, _.useEffect)(() => {
+    let rig = e.current.rig;
+    rig && (rig.setHand(hand === `R` ? `R` : `L`), rig.setNumber(num));
+  }, [hand, num]);
+  (0, _.useEffect)(() => {
+    e.current.rig?.setVisible(t);
+  }, [t]);
   return (0, S.jsxs)(`div`, {
     className: `bv${t ? ` on` : ``}`,
     onPointerDown: (ev) => {
@@ -2018,25 +3007,13 @@ function BatView({
     },
     children: [
       (0, S.jsx)(`div`, { dangerouslySetInnerHTML: { __html: BB_SCENE } }),
-      (0, S.jsx)(`div`, {
-        ref: reg(`pitcher`),
-        className: `bv-pitcher`,
-        dangerouslySetInnerHTML: { __html: BB_PITCHER },
-      }),
+      (0, S.jsx)(`canvas`, { ref: cvP, className: `bv-canvas bv-canvas-p` }),
       (0, S.jsx)(`div`, { className: `bv-zone` }),
       (0, S.jsx)(`div`, { ref: reg(`marker`), className: `bv-marker` }),
       (0, S.jsx)(`div`, { ref: reg(`ball`), className: `bv-ball` }),
       (0, S.jsx)(`div`, { ref: reg(`spark`), className: `bv-spark` }),
-      (0, S.jsxs)(`div`, {
-        ref: reg(`batter`),
-        // 좌타(L)는 1루 쪽(오른쪽), 우타(R)는 3루 쪽(왼쪽)에 좌우 반전으로 섬
-        className: `bv-batter ${hand === `R` ? `R` : `L`}`,
-        children: [
-          (0, S.jsx)(`div`, { dangerouslySetInnerHTML: { __html: BB_BATTER } }),
-          (0, S.jsx)(`div`, { className: `bv-num`, children: num }),
-          (0, S.jsx)(`div`, { className: `bv-bat` }),
-        ],
-      }),
+      // 좌타는 1루 쪽(오른쪽), 우타는 3루 쪽(왼쪽)에 섬 — rig.js가 그림
+      (0, S.jsx)(`canvas`, { ref: cvB, className: `bv-canvas bv-canvas-b` }),
       r &&
         (0, S.jsx)(
           `div`,
@@ -2046,7 +3023,7 @@ function BatView({
       n && (0, S.jsx)(`div`, { className: `bv-pitchinfo`, children: n }),
       (0, S.jsx)(`div`, {
         className: `bv-hint`,
-        children: `Enter 플레이볼 · Space / 화면 터치 스윙`,
+        children: mode === `2P` ? `타자: Space / 화면 터치 스윙 · 타구 후 ← 귀루 → 진루` : `Enter 플레이볼 · Space / 화면 터치 스윙 · 타구 후 ← 귀루 → 진루`,
       }),
     ],
   });
@@ -2131,8 +3108,15 @@ function ce() {
                 pitchInfo: t.pitchInfo,
                 batterNumber: t.batterNumber,
                 batterHand: t.batterHand,
+                mode: t.mode,
                 feedback: t.swingFeedback,
                 onSwing: n.swing,
+              }),
+              (0, S.jsx)(PitchPrompt, {
+                show: t.mode === `2P` && t.awaitPitch && !t.paused && !t.gameOver,
+                sel: t.pitchSel,
+                defName: t.teams[1 - t.bat]?.name,
+                batName: t.teams[t.bat]?.name,
               }),
               (0, S.jsx)(ee, {
                 statusText: t.statusText,
@@ -2144,7 +3128,14 @@ function ce() {
                 outs: t.outs,
                 batterNumber: t.batterNumber,
                 batterHand: t.batterHand,
+                mode: t.mode,
+                teams: t.teams,
+                inning: t.inning,
+                half: t.half,
+                bat: t.bat,
+                tbRunner: t.tbRunner,
               }),
+              (0, S.jsx)(RunCtl, { ctl: t.paused ? null : t.runCtl, onCmd: n.runCmd }),
               (0, S.jsx)(ie, {
                 baseStatus: t.baseStatus,
                 canManualRunner: t.canManualRunner && !t.gameOver,
@@ -2156,10 +3147,24 @@ function ce() {
                 color: t.result.color,
                 visible: t.result.visible,
               }),
+              (0, S.jsx)(HalfBreak, {
+                info: t.halfBreak,
+                teams: t.teams,
+                innings: t.innings,
+                inning: t.inning,
+                half: t.half,
+                onNext: n.nextHalf,
+              }),
               (0, S.jsx)(ne, {
                 visible: t.gameOver,
                 finalScore: t.totalScore,
                 onRestart: n.restartGame,
+                mode: t.mode,
+                endInfo: t.endInfo,
+                teams: t.teams,
+                innings: t.innings,
+                inning: t.inning,
+                half: t.half,
               }),
             ],
           }),
@@ -2184,6 +3189,14 @@ function ce() {
         hitLog: t.hitLog,
         onResume: n.resumeGame,
         onQuit: n.restartGame,
+        mode: t.mode,
+        teams: t.teams,
+        innings: t.innings,
+        inning: t.inning,
+        half: t.half,
+        bat: t.bat,
+        halfRuns: t.halfRuns,
+        batterNumber: t.batterNumber,
       }),
       (0, S.jsx)(oe, {
         visible: !t.difficulty && !t.gameOver,
@@ -2274,6 +3287,59 @@ function ce() {
 .bb-quit-actions{display:flex;gap:10px}
 .bb-quit-actions .bb-btn{flex:1;padding:12px}
 .bb-main-title{font-size:22px;font-weight:900;color:#fff;margin-bottom:12px;letter-spacing:.5px}
+
+/* ── 2인 대결: 점수판 ── */
+.bb-sb2{min-width:130px;padding:8px 12px;text-align:left}
+.bb-sb2 .bb-score-label{text-align:center;margin-bottom:4px}
+.bb-sb2-row{display:flex;justify-content:space-between;gap:14px;font-size:15px;font-weight:800;color:#bbb;line-height:1.5}
+.bb-sb2-row b{color:#fff;font-size:18px}
+.bb-sb2-row.batting{color:#f1c40f}
+/* 이닝별 점수표 */
+.bb-linescore{border-collapse:collapse;margin:10px auto 14px;font-size:13px;background:#ffffff0d;border-radius:6px;overflow:hidden}
+.bb-linescore th,.bb-linescore td{padding:4px 8px;text-align:center;min-width:22px;border-bottom:1px solid #ffffff14}
+.bb-linescore th{color:#95a5a6;font-weight:700}
+.bb-linescore th.ext{color:#e67e22}
+.bb-linescore td.name{text-align:left;font-weight:800;color:#ecf0f1}
+.bb-linescore td.runs{font-weight:900;color:#f1c40f}
+/* 타순표 */
+.bb-lineup{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:4px 0}
+.bb-lineup-name{font-size:12px;font-weight:800;color:#ecf0f1;margin-right:4px;min-width:28px}
+.bb-lineup-chip{font-size:11px;font-weight:700;padding:2px 6px;border-radius:9px;background:#ffffff14;color:#ddd}
+.bb-lineup-chip.L{box-shadow:inset 0 -2px 0 #3498db}
+.bb-lineup-chip.R{box-shadow:inset 0 -2px 0 #e67e22}
+.bb-lineup-chip.now{background:#f1c40f;color:#111}
+/* 공수 교대 */
+.bb-halfbreak h2{color:#f1c40f}
+.bb-halfbreak p{margin:2px 0 6px;font-size:17px}
+.bb-halfbreak .bb-halfbreak-extra{color:#e67e22;font-weight:800}
+.bb-halfbreak .bb-halfbreak-tip{font-size:12px;color:#aaa;margin-bottom:14px}
+.bb-end-score{font-size:16px!important;color:#ddd}
+.bb-innings-pick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.bb-innings-pick .bb-btn{padding:12px 0}
+
+/* ── 주루 지시 패널 (타구 진행 중) ── */
+.bb-runctl{position:absolute;left:16px;bottom:14px;z-index:26;background:#000000d0;border:1px solid #333;border-left:4px solid #e67e22;border-radius:8px;padding:8px 10px;min-width:250px;font-size:12px}
+.bb-runctl-head{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-weight:800;color:#f1c40f}
+.bb-runctl-head span{flex:1}
+.bb-runctl-row{display:flex;align-items:center;gap:6px;padding:3px 0}
+.bb-runctl-row.manual .bb-runctl-name{color:#f1c40f}
+.bb-runctl-name{flex:1;color:#ecf0f1;font-weight:700}
+.bb-runctl button{border:none;border-radius:4px;padding:4px 8px;font-size:11px;font-weight:800;color:#fff;background:#34495e;cursor:pointer}
+.bb-runctl button:hover:not(:disabled){background:#e67e22}
+.bb-runctl button:disabled{opacity:.35;cursor:not-allowed}
+.bb-field .bb-runner.manual{border-color:#fff;box-shadow:0 0 0 2px #f1c40f,0 0 10px #f1c40f}
+
+/* ── 2P 투구 선택 안내 ── */
+.bb-pitchprompt{position:absolute;left:50%;top:150px;transform:translateX(-50%);z-index:24;background:#000000d9;border:1px solid #2980b9;border-radius:8px;padding:10px 16px;font-size:13px;line-height:1.7;color:#ddd;text-align:center;pointer-events:none;white-space:nowrap}
+.bb-pitchprompt-title{color:#5dade2;font-weight:900;font-size:14px;margin-bottom:2px}
+.bb-pitchprompt-state{display:flex;justify-content:center;gap:12px;margin-top:4px;font-weight:800}
+.bb-pitchprompt-state span{padding:1px 10px;border-radius:10px;background:#ffffff14;color:#888}
+.bb-pitchprompt-state span.ok{background:#27ae60;color:#fff}
+
+/* ── 타자·투수 동작 캔버스 (rig.js) ── */
+.bv-canvas{position:absolute;left:0;top:0;width:850px;height:580px;pointer-events:none}
+.bv-canvas-p{z-index:2}
+.bv-canvas-b{z-index:6}
 
 /*APP_CSS_END*//*$vite$:1*/</style>
   </head>
