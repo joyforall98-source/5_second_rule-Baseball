@@ -111,8 +111,10 @@
 /* How To Play / 메인 메뉴 */
 .bb-menu .bb-btn{padding:12px 16px;font-size:15px;text-align:left}
 .bb-menu{display:flex;flex-direction:column;gap:10px}
-.bb-howto{display:grid;gap:4px;font-size:13px;margin:4px 0 10px}
-.bb-howto div{display:grid;grid-template-columns:76px 1fr;gap:8px;padding:5px 8px;background:#ffffff0d;border-radius:5px}
+.bb-howto{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12.5px;margin:4px 0 10px}
+.bb-howto div{display:grid;grid-template-columns:62px 1fr;gap:6px;padding:5px 8px;background:#ffffff0d;border-radius:5px}
+/* How To Play가 열려 있을 때만 카드를 넓혀 2열 배치 */
+.bb-pause-card:has(.bb-howto){max-width:660px}
 .bb-howto b{color:#f1c40f}
 
 /* 상황판 안의 타순: 이름 없이 번호 칩만 */
