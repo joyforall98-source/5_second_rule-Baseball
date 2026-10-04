@@ -104,7 +104,7 @@ function bbGenPitch(hard) {
     elapsed: 0,
   };
 }
-// 2P: 수비 플레이어가 고른 구종(1 직구 2 슬라이더 3 커브 4 체인지업)과 코스(3×3, Shift면 존 밖으로)
+// 사람이 던질 때: 고른 구종과 마우스로 찍은 도달 지점(존 좌표, ±1이 존 경계).
 // 제구 오차가 있어서 노린 곳에서 조금 벗어날 수 있음
 var BB_PITCHES = [
   [`직구`, [143, 154], 0, -0.1],
@@ -115,13 +115,10 @@ var BB_PITCHES = [
 function bbMakePitch(hard, sel) {
   let [name, spd, bx, by] = BB_PITCHES[sel.type - 1],
     kmh = Math.round(bbRand(spd[0], spd[1])),
-    [cx, cy] = sel.zone,
-    tx = cx * 0.62,
-    ty = cy * 0.62,
+    [tx, ty] = sel.zone,
     g = () => Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random()),
-    spread = hard ? 0.2 : 0.28;
-  sel.out && (cx || cy ? ((tx = cx * 1.45), (ty = cy * 1.45)) : (ty = 1.45)); // 가운데에서 빼면 높은 볼
-  let zx = tx + g() * spread,
+    spread = hard ? 0.15 : 0.22,
+    zx = tx + g() * spread,
     zy = ty + g() * spread;
   return {
     name,
@@ -659,6 +656,45 @@ function b() {
     A = (0, _.useCallback)(() => {
       let e = o.current;
       if (e.isPitched || e.gameOver) return;
+      if (!e.noPick && e.baseStatus.some(Boolean) && Math.random() < 0.18) {
+        let occ = [1, 2, 3].filter((b) => e.baseStatus[b - 1]),
+          b = occ[0] === 1 && Math.random() < 0.75 ? 1 : occ[Math.floor(Math.random() * occ.length)], // 대부분 1루
+          out = Math.random() < (e.difficulty === `HARD` ? 0.12 : 0.06),
+          ball = t.current,
+          from = bbPx(BB_MOUND),
+          to = v[b],
+          f = 0;
+        ((e.isPitched = !0),
+          (e.playballDisabled = !0),
+          (e.swingDisabled = !0),
+          (e.stealWindow = !1),
+          (e.awaitPitch = !1),
+          (e.fieldView = `top-down-view`),
+          (e.statusText = `${b}루 견제!`),
+          ie(),
+          ball && ((ball.style.display = `block`), (ball.style.transform = `translateX(-50%) translateZ(6px) rotateX(-90deg)`)),
+          T());
+        d.current = setInterval(() => {
+          if (e.paused) return;
+          f = Math.min(1, f + 0.07);
+          ball && ((ball.style.bottom = from.bottom + (to.bottom - from.bottom) * f + `px`), (ball.style.left = from.left + (to.left - from.left) * f + `%`));
+          if (f < 1) return;
+          d.current &&= (clearInterval(d.current), null);
+          if (out) {
+            let bs = [...e.baseStatus];
+            ((bs[b - 1] = !1), (e.baseStatus = bs), e.outs++, E(bbOut(`${b}루 견제사`), `#c0392b`), (e.statusText = `${b}루 주자 견제사!`));
+            e.hitLog.push({ batter: e.batterNumber, team: e.bat, hitType: `${b}루 주자 견제사`, rbis: 0, scoreAfter: e.totalScore, time: Date.now() });
+          } else ((e.statusText = `${b}루 주자 귀루, 세이프`), E(`SAFE!`, `#2ecc71`));
+          T();
+          // 견제가 끝나면 원래 고른 투구를 그대로 던짐 (견제사로 3아웃이면 공수 교대)
+          S(() => {
+            ((e.isPitched = !1), re());
+            (out && oe()) || ((e.noPick = !0), A());
+          }, 1100);
+        }, 30);
+        return;
+      }
+      e.noPick = !1;
       (ne(),
         (e.isPitched = !0),
         (e.playballDisabled = !0),
@@ -917,22 +953,23 @@ function b() {
         ((h.current = null), T());
       }
     }, [T, k]);
+  // 수비 투구 선택: { type } 또는 { zone: [zx, zy] }. 둘 다 고르면 잠시 뒤 투구
+  let pickPitch = (0, _.useCallback)(
+    (part) => {
+      let s = o.current;
+      if (!s.awaitPitch || s.paused || s.halfBreak || s.gameOver) return;
+      (Object.assign(s.pitchSel, part),
+        s.pitchSel.type && s.pitchSel.zone && ((s.awaitPitch = !1), (s.statusText = `투구 준비 완료!`), S(A, 600)),
+        T());
+    },
+    [S, T, A],
+  );
   (0, _.useEffect)(() => {
-    let PITCH_KEYS = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Numpad1: 1, Numpad2: 2, Numpad3: 3, Numpad4: 4 },
-      ZONE_KEYS = { KeyQ: [-1, 1], KeyW: [0, 1], KeyE: [1, 1], KeyA: [-1, 0], KeyS: [0, 0], KeyD: [1, 0], KeyZ: [-1, -1], KeyX: [0, -1], KeyC: [1, -1] };
+    let PITCH_KEYS = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Numpad1: 1, Numpad2: 2, Numpad3: 3, Numpad4: 4 };
     let e = (e) => {
       let s = o.current;
       if (s.halfBreak && e.code === `Enter`) return (e.preventDefault(), nextHalf());
-      // 수비: 구종·코스 선택 (무엇을 골랐는지는 화면에 보이지 않음)
-      if (s.awaitPitch && !s.paused && !s.halfBreak && !s.gameOver && (e.code in PITCH_KEYS || e.code in ZONE_KEYS)) {
-        (e.preventDefault(),
-          e.code in PITCH_KEYS
-            ? (s.pitchSel.type = PITCH_KEYS[e.code])
-            : ((s.pitchSel.zone = ZONE_KEYS[e.code]), (s.pitchSel.out = e.shiftKey)));
-        s.pitchSel.type && s.pitchSel.zone && ((s.awaitPitch = !1), (s.statusText = `투구 준비 완료!`), S(A, 600));
-        T();
-        return;
-      }
+      if (e.code in PITCH_KEYS && s.awaitPitch) return (e.preventDefault(), pickPitch({ type: PITCH_KEYS[e.code] }));
       // 주루 지시: → 전원 진루, ← 전원 귀루
       if (s.play && !s.paused && s.bat !== s.cpu && (e.code === `ArrowRight` || e.code === `ArrowLeft`)) {
         (e.preventDefault(), s.play.commandAll(e.code === `ArrowRight` ? `advance` : `return`), T());
@@ -955,7 +992,7 @@ function b() {
       window.addEventListener(`keydown`, e),
       () => window.removeEventListener(`keydown`, e)
     );
-  }, [pe, A, _e, ve, S, T]);
+  }, [pe, A, _e, ve, S, T, pickPitch]);
   // 경기 시작: { mode: TGA|1P|2P, diff: EASY|HARD, innings }. 타순별 좌/우타는 여기서 확정되어 경기 내내 유지
   // 컴퓨터 대결은 컴퓨터가 선공(초), 플레이어가 후공(말). TGA는 9회말 0:5에서 시작하는 역전 미션
   let ye = (0, _.useCallback)(
@@ -1030,7 +1067,7 @@ function b() {
       halfRuns: j.totalScore - j.halfStartScore,
       endInfo: j.endInfo,
       awaitPitch: j.awaitPitch,
-      pitchSel: { type: !!j.pitchSel.type, zone: !!j.pitchSel.zone },
+      pitchSel: { type: j.pitchSel.type, zone: !!j.pitchSel.zone },
       tbRunner: j.tbRunner,
       // 주루 지시 패널: 살아있는 주자별 가능 여부
       runCtl:
@@ -1056,6 +1093,7 @@ function b() {
       resumeGame: ve,
       setDifficulty: ye,
       nextHalf,
+      pickPitch,
       runCmd: (id, cmd) => {
         let P = o.current.play;
         (P && (id === `all` ? P.commandAll(cmd) : P.command(id, cmd)), T());
@@ -1421,20 +1459,18 @@ function RunCtl({ ctl, onCmd }) {
       })
     : null;
 }
-// 2P: 수비 플레이어의 구종·코스 선택 안내 (고른 내용은 보이지 않음)
-function PitchPrompt({ show, sel, defName }) {
+// 수비 투구 선택: 구종 버튼 + 존 주변 클릭으로 도달 지점
+function PitchPrompt({ show, sel, defName, onPick }) {
   return show
     ? (0, S.jsxs)(`div`, {
         className: `bb-pitchprompt`,
         children: [
-          (0, S.jsx)(`div`, { className: `bb-pitchprompt-title`, children: `${defName} 투구` }),
-          (0, S.jsx)(`div`, { children: `1–4 구종 · QWE/ASD/ZXC 코스 · ⇧ 볼` }),
-          (0, S.jsxs)(`div`, {
-            className: `bb-pitchprompt-state`,
-            children: [
-              (0, S.jsx)(`span`, { className: sel.type ? `ok` : ``, children: `구종` }),
-              (0, S.jsx)(`span`, { className: sel.zone ? `ok` : ``, children: `코스` }),
-            ],
+          (0, S.jsx)(`div`, { className: `bb-pitchprompt-title`, children: `${defName} 투구 · 구종을 고르고 존 주변을 클릭${sel.zone ? ` ✓` : ``}` }),
+          (0, S.jsx)(`div`, {
+            className: `bb-pitchprompt-types`,
+            children: BB_PITCHES.map(([name], i) =>
+              (0, S.jsx)(`button`, { className: sel.type === i + 1 ? `on` : ``, onClick: () => onPick({ type: i + 1 }), children: `${i + 1} ${name}` }, i),
+            ),
           }),
         ],
       })
@@ -1444,8 +1480,8 @@ function PitchPrompt({ show, sel, defName }) {
 var HOWTO = [
   [`타격`, `Space · 화면 터치`],
   [`투구 시작`, `Enter (컴퓨터 투구)`],
-  [`투구 선택`, `1–4 구종 · QWE/ASD/ZXC 코스 · ⇧ 볼`],
-  [`주루`, `→ 진루 · ← 귀루 · 🏃 도루`],
+  [`투구 선택`, `1–4 구종 · 존 주변 클릭 = 도달 지점`],
+  [`주루`, `→ 진루 · ← 귀루 · 🏃 도루 · 견제 주의`],
   [`일시정지`, `Esc`],
   [`5초 룰`, `타구는 5초 안에 판정 확정`],
   [`연장`, `동점이면 무사 2루 승부치기`],
@@ -1746,6 +1782,8 @@ function BatView({
   onSwing: i,
   batterNumber: num,
   batterHand: hand,
+  aim,
+  onAim,
 }) {
   let reg = (k) => (el) => {
       e.current[k] = el;
@@ -1767,9 +1805,16 @@ function BatView({
     e.current.rig?.setVisible(t);
   }, [t]);
   return (0, S.jsxs)(`div`, {
-    className: `bv${t ? ` on` : ``}`,
+    className: `bv${t ? ` on` : ``}${aim ? ` aim` : ``}`,
     onPointerDown: (ev) => {
-      ev.target.closest(`button`) || i();
+      if (ev.target.closest(`button`)) return;
+      if (!aim) return i();
+      let r = ev.currentTarget.getBoundingClientRect(),
+        k = r.width / 850,
+        x = (ev.clientX - r.left) / k,
+        yy = (ev.clientY - r.top) / k,
+        c = (v) => Math.max(-2, Math.min(2, v));
+      onAim({ zone: [c((x - BB_Z.cx) / (BB_Z.w / 2)), c((BB_Z.cy - yy) / (BB_Z.h / 2))] });
     },
     children: [
       (0, S.jsx)(`div`, { dangerouslySetInnerHTML: { __html: BB_SCENE } }),
@@ -1871,11 +1916,14 @@ function ce() {
                 batterHand: t.batterHand,
                 feedback: t.swingFeedback,
                 onSwing: n.swing,
+                aim: t.awaitPitch && !t.paused,
+                onAim: n.pickPitch,
               }),
               (0, S.jsx)(PitchPrompt, {
                 show: t.awaitPitch && !t.paused && !t.gameOver,
                 sel: t.pitchSel,
                 defName: t.teams[1 - t.bat]?.name,
+                onPick: n.pickPitch,
               }),
               (0, S.jsx)(ee, {
                 statusText: t.statusText,

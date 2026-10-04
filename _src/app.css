@@ -99,9 +99,6 @@
 /* ── 2P 투구 선택 안내 ── */
 .bb-pitchprompt{position:absolute;left:50%;top:150px;transform:translateX(-50%);z-index:24;background:#000000d9;border:1px solid #2980b9;border-radius:8px;padding:10px 16px;font-size:13px;line-height:1.7;color:#ddd;text-align:center;pointer-events:none;white-space:nowrap}
 .bb-pitchprompt-title{color:#5dade2;font-weight:900;font-size:14px;margin-bottom:2px}
-.bb-pitchprompt-state{display:flex;justify-content:center;gap:12px;margin-top:4px;font-weight:800}
-.bb-pitchprompt-state span{padding:1px 10px;border-radius:10px;background:#ffffff14;color:#888}
-.bb-pitchprompt-state span.ok{background:#27ae60;color:#fff}
 
 /* ── 타자·투수 동작 캔버스 (rig.js) ── */
 .bv-canvas{position:absolute;left:0;top:0;width:850px;height:580px;pointer-events:none}
@@ -121,3 +118,10 @@
 .bb-hud .bb-lineup{grid-column:1/-1;gap:2px;margin:6px 0 0;flex-wrap:nowrap}
 .bb-hud .bb-lineup-name{display:none}
 .bb-hud .bb-lineup-chip{font-size:10px;padding:1px 3px}
+
+/* 투구 선택: 구종 버튼, 존 주변 클릭으로 조준 */
+.bb-pitchprompt-types{display:flex;gap:6px;justify-content:center;margin-top:6px}
+.bb-pitchprompt-types button{pointer-events:auto;cursor:pointer;border:none;border-radius:6px;padding:6px 10px;font-size:13px;font-weight:800;color:#fff;background:#34495e}
+.bb-pitchprompt-types button:hover{background:#2980b9}
+.bb-pitchprompt-types button.on{background:#27ae60}
+.bv.aim{cursor:crosshair}
