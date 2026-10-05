@@ -1216,6 +1216,9 @@ var BB_Z = { cx: 425, cy: 338, w: 96, h: 116 },
   bbLineup = () => Array.from({ length: 9 }, () => (Math.random() < 0.5 ? `L` : `R`)),
   bbRand = (a, b) => a + Math.random() * (b - a);
 // 구종 [이름, 비중, 구속범위, 좌우 변화, 낙차(+는 떨어짐)]
+// Turn The Game Around 난이도별: 시작 점수 차, 컴퓨터 투수 스트라이크 비율(null = 기본 55%), 내 타구 질 보정
+// 보정에 따른 인플레이 타율(시뮬레이션): EASY 약 .42 · SOSO 약 .36 · HARD 약 .33
+var BB_TGA = { EASY: { gap: 2, strike: 0.5, boost: 0.08 }, SOSO: { gap: 4, strike: 0.55, boost: 0.03 }, HARD: { gap: 5, strike: null, boost: 0 } };
 function bbGenPitch(hard, strikeP) {
   let list = hard
       ? [
@@ -1782,8 +1785,7 @@ function b() {
       let q = 1 - (adt / win) ** 1.3;
       ((q *= 1 - 0.15 * Math.max(0, Math.min(1, off) - 0.5)),
         off > 1 && (q *= 0.5),
-        // TGA EASY: 내 타구 질을 조금 올려 안타 확률↑ (인플레이 타율 약 .33 → .39)
-        e.mode === `TGA` && e.difficulty === `EASY` && e.bat !== e.cpu && (q += 0.08),
+        e.mode === `TGA` && e.bat !== e.cpu && (q += BB_TGA[e.difficulty].boost), // TGA: 내 타구 질 보정
         (q = Math.max(0, Math.min(1, q + (Math.random() - 0.5) * 0.16))));
       // 빠르면 당겨침: 좌타자는 우측(+), 우타자는 좌측(-)
       let pull = e.lineup[e.batterNumber - 1] === `R` ? -1 : 1,
@@ -1867,7 +1869,7 @@ function b() {
       let P =
         e.pitchSel.type
           ? bbMakePitch(e.difficulty === `HARD`, e.pitchSel)
-          : bbGenPitch(e.difficulty === `HARD`, e.mode === `TGA` && e.difficulty === `EASY` ? 0.5 : null); // TGA EASY: 볼이 더 많음
+          : bbGenPitch(e.difficulty === `HARD`, e.mode === `TGA` ? BB_TGA[e.difficulty].strike : null);
       ((e.awaitPitch = !1), (e.pitchSel = { type: null, zone: null, out: !1 }), bvRef.current.rig?.pitcher(`windup`));
       ((e.pitch = P),
         (e.pitchType = P.isStrike ? `strike` : `ball`),
@@ -2159,16 +2161,16 @@ function b() {
       () => window.removeEventListener(`keydown`, e)
     );
   }, [pe, A, _e, ve, S, T, pickPitch]);
-  // 경기 시작: { mode: TGA|1P|2P, diff: EASY|HARD, innings }. 타순별 좌/우타는 여기서 확정되어 경기 내내 유지
-  // 컴퓨터 대결은 컴퓨터가 선공(초), 플레이어가 후공(말). TGA는 9회말 0:5에서 시작하는 역전 미션
+  // 경기 시작: { mode: TGA|1P|2P, diff: EASY|SOSO(TGA 전용)|HARD, innings }. 타순별 좌/우타는 여기서 확정되어 경기 내내 유지
+  // 컴퓨터 대결은 컴퓨터가 선공(초), 플레이어가 후공(말). TGA는 9회말 n : n+차이에서 시작하는 역전 미션
   let ye = (0, _.useCallback)(
     (cfg) => {
       let t = o.current,
         tga = cfg.mode === `TGA`,
         team = (name, line = []) => ({ name, lineup: bbLineup(), batter: 1, runs: 0, line }),
-        // TGA: n : n+차이 (EASY 2점, HARD 5점). 이닝별 점수는 합계에 맞게 무작위 배분
+        // TGA: n : n+차이 (BB_TGA). 이닝별 점수는 합계에 맞게 무작위 배분
         n = Math.floor(Math.random() * 7),
-        gap = cfg.diff === `HARD` ? 5 : 2,
+        gap = tga ? BB_TGA[cfg.diff].gap : 0,
         spread = (total, len) => {
           let a = Array(len).fill(0);
           for (let k = 0; k < total; k++) a[Math.floor(Math.random() * len)]++;
@@ -2661,7 +2663,7 @@ var HOWTO = [
   [`5초 룰`, `타구는 5초 안에 판정 확정`],
   [`연장`, `동점이면 무사 2루 승부치기`],
   [`콜드`, `5회 15점 · 7회 10점 차 (5·9이닝)`],
-  [`TGA`, `9회말 2점(EASY)·5점(HARD) 차 — 역전하면 성공`],
+  [`TGA`, `9회말 2·4·5점 차(EASY·SOSO·HARD) — 역전`],
 ];
 function HowTo() {
   return (0, S.jsx)(`div`, {
@@ -2889,7 +2891,12 @@ function oe({ visible: e, onSelect: t }) {
         btn(`👥 Double Player`, () => pick(`mode`, `2P`)),
         btn(`❓ How To Play`, () => setStep(`help`), `bb-btn-home`),
       ],
-      diff: [btn(`🟢 EASY`, () => pick(`diff`, `EASY`)), btn(`🔴 HARD`, () => pick(`diff`, `HARD`), `bb-btn-quit`), back(`mode`)],
+      diff: [
+        btn(`🟢 EASY`, () => pick(`diff`, `EASY`)),
+        ...(cfg.mode === `TGA` ? [btn(`🟡 SOSO`, () => pick(`diff`, `SOSO`), `bb-btn-swing`)] : []),
+        btn(`🔴 HARD`, () => pick(`diff`, `HARD`), `bb-btn-quit`),
+        back(`mode`),
+      ],
       innings: [
         (0, S.jsx)(`div`, { className: `bb-innings-pick`, children: [1, 3, 5, 9].map((n) => btn(`${n}이닝`, () => pick(`innings`, n))) }, `g`),
         back(`diff`),
