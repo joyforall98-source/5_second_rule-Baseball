@@ -2178,9 +2178,9 @@ function b() {
           cfg.mode === `2P`
             ? [team(`P1`), team(`P2`)]
             : tga
-              ? [team(`CPU`, [0, 0, 1, 0, 2, 0, 0, 2, 0]), team(`나`, [0, 0, 0, 0, 0, 0, 0, 0])]
+              ? [team(`CPU`, cfg.diff === `HARD` ? [0, 0, 1, 0, 2, 0, 0, 2, 0] : [0, 0, 1, 0, 0, 0, 0, 2, 0]), team(`나`, [0, 0, 0, 0, 0, 0, 0, 0])]
               : [team(`CPU`), team(`나`)]),
-        tga && (t.teams[0].runs = 5),
+        tga && (t.teams[0].runs = cfg.diff === `HARD` ? 5 : 3), // EASY는 3점 차
         loadTeam(),
         ae(),
         T());
@@ -2651,7 +2651,7 @@ var HOWTO = [
   [`5초 룰`, `타구는 5초 안에 판정 확정`],
   [`연장`, `동점이면 무사 2루 승부치기`],
   [`콜드`, `5회 15점 · 7회 10점 차 (5·9이닝)`],
-  [`TGA`, `9회말 0:5 — 역전하면 성공`],
+  [`TGA`, `9회말 0:3(EASY) · 0:5(HARD) — 역전하면 성공`],
 ];
 function HowTo() {
   return (0, S.jsx)(`div`, {
