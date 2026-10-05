@@ -2122,11 +2122,18 @@ function b() {
     [S, T, A],
   );
   (0, _.useEffect)(() => {
-    let PITCH_KEYS = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Numpad1: 1, Numpad2: 2, Numpad3: 3, Numpad4: 4 };
+    let PITCH_KEYS = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Numpad1: 1, Numpad2: 2, Numpad3: 3, Numpad4: 4 },
+      // 키보드 조준(2인 대결에서 상대가 못 보게): 존 3×3 칸, Shift를 누르면 존 밖으로 (가운데는 높은 볼)
+      ZONE_KEYS = { KeyQ: [-1, 1], KeyW: [0, 1], KeyE: [1, 1], KeyA: [-1, 0], KeyS: [0, 0], KeyD: [1, 0], KeyZ: [-1, -1], KeyX: [0, -1], KeyC: [1, -1] };
     let e = (e) => {
       let s = o.current;
       if (s.halfBreak && e.code === `Enter`) return (e.preventDefault(), nextHalf());
       if (e.code in PITCH_KEYS && s.awaitPitch) return (e.preventDefault(), pickPitch({ type: PITCH_KEYS[e.code] }));
+      if (e.code in ZONE_KEYS && s.awaitPitch) {
+        let [cx, cy] = ZONE_KEYS[e.code],
+          k = e.shiftKey ? 1.45 : 0.62;
+        return (e.preventDefault(), pickPitch({ zone: e.shiftKey && !cx && !cy ? [0, 1.45] : [cx * k, cy * k] }));
+      }
       // 주루 지시: → 전원 진루, ← 전원 귀루
       if (s.play && !s.paused && s.bat !== s.cpu && (e.code === `ArrowRight` || e.code === `ArrowLeft`)) {
         (e.preventDefault(), s.play.commandAll(e.code === `ArrowRight` ? `advance` : `return`), T());
@@ -2622,7 +2629,7 @@ function PitchPrompt({ show, sel, defName, onPick }) {
     ? (0, S.jsxs)(`div`, {
         className: `bb-pitchprompt`,
         children: [
-          (0, S.jsx)(`div`, { className: `bb-pitchprompt-title`, children: `${defName} 투구 · 구종을 고르고 존 주변을 클릭${sel.zone ? ` ✓` : ``}` }),
+          (0, S.jsx)(`div`, { className: `bb-pitchprompt-title`, children: `${defName} 투구 · 존 클릭 또는 QWE/ASD/ZXC${sel.zone ? ` ✓` : ``}` }),
           (0, S.jsx)(`div`, {
             className: `bb-pitchprompt-types`,
             children: BB_PITCHES.map(([name], i) =>
@@ -2637,7 +2644,8 @@ function PitchPrompt({ show, sel, defName, onPick }) {
 var HOWTO = [
   [`타격`, `Space · 화면 터치`],
   [`투구 시작`, `Enter (컴퓨터 투구)`],
-  [`투구 선택`, `1–4 구종 · 존 주변 클릭 = 도달 지점`],
+  [`투구 구종`, `1 직구 · 2 슬라이더 · 3 커브 · 4 체인지업`],
+  [`투구 코스`, `존 클릭 · 또는 QWE/ASD/ZXC (⇧ 볼)`],
   [`주루`, `→ 진루 · ← 귀루 · 🏃 도루 · 견제 주의`],
   [`일시정지`, `Esc`],
   [`5초 룰`, `타구는 5초 안에 판정 확정`],
