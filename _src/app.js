@@ -522,6 +522,12 @@ function b() {
             fromRule || next(700);
             return;
           }
+          // 끝내기: 홈런(그라운드 홈런 포함)은 모든 득점, 그 밖에는 결승점까지만 인정
+          let need = e.teams[0].runs + 1 - e.totalScore;
+          if (e.half === `bottom` && e.inning >= e.innings && !sim.homeRun && sim.batterBase !== 4 && need > 0 && sim.runs > need) {
+            let fix = (s) => s.replace(`${sim.runs}타점`, `${need}타점`).replace(`${sim.runs}점 득점`, `${need}점 득점`);
+            sim = { ...sim, runs: need, label: fix(sim.label), display: fix(sim.display), status: fix(sim.status) };
+          }
           ((e.outs += sim.outsAdded),
             (e.totalScore += sim.runs),
             (e.baseStatus = e.outs >= 3 ? [!1, !1, !1] : sim.newBases),
