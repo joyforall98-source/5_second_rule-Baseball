@@ -36,6 +36,9 @@
 .bv-marker.bad{border-color:#95a5a6;box-shadow:none}
 .bv-marker.hint.bad::after{border-color:#95a5a6;box-shadow:none}
 .bb-pitchprompt-types.pick button{background:#7f3b2d}
+.bb-runalert{border-color:#e67e22;animation:bbWarn .5s ease-in-out infinite alternate}
+.bb-runalert .bb-pitchprompt-title{color:#f39c12}
+@keyframes bbWarn{to{box-shadow:0 0 18px #e67e22}}
 @keyframes bvPulse{0%,to{opacity:.55;transform:translate(-50%,-50%) scale(.9)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.05)}}
 
 .bv-spark{position:absolute;width:90px;height:90px;transform:translate(-50%,-50%) scale(.2);border-radius:50%;opacity:0;z-index:5;pointer-events:none;
