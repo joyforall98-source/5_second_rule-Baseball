@@ -54,6 +54,7 @@ var BB_Z = { cx: 425, cy: 338, w: 96, h: 116 },
   bbPlateY = (zy) => BB_Z.cy - (zy * BB_Z.h) / 2,
   bbPersp = (p) => (1 / (1 - 0.75 * p) - 1) / 3, // 원근: 가까워질수록 빨리 커짐 (p=1에서 1)
   bbSwingWindow = (diff) => (diff === `HARD` ? 85 : 115), // 정타 기준 ± 허용 ms
+  BB_HINT_WIN = 0.35, // TGA EASY 타이밍 원이 초록인 구간 (허용 창의 비율)
   // (BB_POS, bbOut 은 sim.js에 있음)
   // 1~9번 타순, 타순별 좌/우타는 경기마다 랜덤
   bbLineup = () => Array.from({ length: 9 }, () => (Math.random() < 0.5 ? `L` : `R`)),
@@ -211,7 +212,7 @@ function b() {
     humanDef = () => o.current.mode === `2P` || o.current.bat === o.current.cpu,
     l = () => {
       let e = o.current;
-      e.batterNumber = e.batterNumber >= 9 ? 1 : e.batterNumber + 1;
+      ((e.batterNumber = e.batterNumber >= 9 ? 1 : e.batterNumber + 1), (e.picks = 0));
     },
     u = (0, _.useRef)(null),
     d = (0, _.useRef)(null),
@@ -403,7 +404,7 @@ function b() {
       let e = o.current;
       if (!e.halfBreak) return;
       ((e.halfBreak = null), e.half === `top` ? (e.half = `bottom`) : ((e.half = `top`), e.inning++), (e.bat = e.half === `top` ? 0 : 1), loadTeam());
-      ((e.outs = 0), (e.strikes = 0), (e.balls = 0), (e.baseStatus = [!1, !1, !1]), (e.tbRunner = null));
+      ((e.outs = 0), (e.strikes = 0), (e.balls = 0), (e.baseStatus = [!1, !1, !1]), (e.tbRunner = null), (e.picks = 0));
       // 승부치기: 직전 타순의 타자를 2루 주자로 두고 무사 2루에서 시작
       e.inning > e.innings && ((e.baseStatus = [!1, !0, !1]), (e.tbRunner = e.batterNumber === 1 ? 9 : e.batterNumber - 1));
       (re(), ae());
@@ -663,12 +664,9 @@ function b() {
           pb(BB_SIM.batted(q, (lat * 45) / 16, q < 0.12 || Math.abs(lat) > 16));
         }, 450));
     }, [S, T]),
-    A = (0, _.useCallback)(() => {
-      let e = o.current;
-      if (e.isPitched || e.gameOver) return;
-      if (!e.noPick && e.baseStatus.some(Boolean) && Math.random() < 0.18) {
-        let occ = [1, 2, 3].filter((b) => e.baseStatus[b - 1]),
-          b = occ[0] === 1 && Math.random() < 0.75 ? 1 : occ[Math.floor(Math.random() * occ.length)], // 대부분 1루
+    // 견제: b루로 던져 견제사 또는 세이프. 끝나면 done(out)
+    pickoff = (b, done) => {
+      let e = o.current,
           out = Math.random() < (e.difficulty === `HARD` ? 0.12 : 0.06),
           ball = t.current,
           from = bbPx(BB_MOUND),
@@ -696,13 +694,19 @@ function b() {
             e.hitLog.push({ batter: e.batterNumber, team: e.bat, hitType: `${b}루 주자 견제사`, rbis: 0, scoreAfter: e.totalScore, time: Date.now() });
           } else ((e.statusText = `${b}루 주자 귀루, 세이프`), E(`SAFE!`, `#2ecc71`));
           T();
-          // 견제가 끝나면 원래 고른 투구를 그대로 던짐 (견제사로 3아웃이면 공수 교대)
           S(() => {
-            ((e.isPitched = !1), re());
-            (out && oe()) || ((e.noPick = !0), A());
+            ((e.isPitched = !1), re(), done(out));
           }, 1100);
         }, 30);
-        return;
+    },
+    A = (0, _.useCallback)(() => {
+      let e = o.current;
+      if (e.isPitched || e.gameOver) return;
+      // 컴퓨터 수비: 주자가 있으면 가끔 견제. 끝나면 원래 투구를 그대로 던짐 (견제사로 3아웃이면 공수 교대)
+      if (!e.noPick && !humanDef() && e.baseStatus.some(Boolean) && Math.random() < 0.18) {
+        let occ = [1, 2, 3].filter((b) => e.baseStatus[b - 1]),
+          b = occ[0] === 1 && Math.random() < 0.75 ? 1 : occ[Math.floor(Math.random() * occ.length)]; // 대부분 1루
+        return pickoff(b, (out) => (out && oe()) || ((e.noPick = !0), A()));
       }
       e.noPick = !1;
       (ne(),
@@ -728,7 +732,10 @@ function b() {
           let bv = bvRef.current,
             last = performance.now(),
             // 스윙 가능한 마지막 시점이 지나면 판정
-            endAt = P.dur + bbSwingWindow(e.difficulty) + 40;
+            endAt = P.dur + bbSwingWindow(e.difficulty) + 40,
+            // TGA EASY 타이밍 원: 공이 오면서 줄어들어 포구 위치 원과 겹칠 때가 정타. 안타가 잘 나오는 구간에서 초록
+            hint = e.mode === `TGA` && e.difficulty === `EASY` && !humanDef(),
+            goWin = bbSwingWindow(e.difficulty) * BB_HINT_WIN;
           (bv.ball && (bv.ball.style.display = `block`),
             bv.rig?.pitcher(`release`),
             bv.rig?.batter(`load`),
@@ -738,9 +745,12 @@ function b() {
                 ? P.dur + (Math.random() + Math.random() - 1) * (e.difficulty === `HARD` ? 60 : 90)
                 : null),
             bv.marker &&
-              e.difficulty === `EASY` &&
+              (e.mode === `TGA` || e.difficulty === `EASY`) &&
               !humanDef() &&
-              ((bv.marker.style.display = `block`),
+              (bv.marker.classList.toggle(`hint`, hint),
+              bv.marker.classList.toggle(`go`, !1),
+              bv.marker.classList.toggle(`bad`, hint && Math.max(Math.abs(P.zx), Math.abs(P.zy)) > 1), // 볼: 회색 (치지 말 것)
+              (bv.marker.style.display = `block`),
               (bv.marker.style.left = bbPlateX(P.zx) + `px`),
               (bv.marker.style.top = bbPlateY(P.zy) + `px`)),
             bbDrawBall(bv.ball, P, 0),
@@ -755,6 +765,10 @@ function b() {
               ((P.elapsed += now - last),
                 (last = now),
                 bbDrawBall(bv.ball, P, P.elapsed / P.dur),
+                hint &&
+                  bv.marker &&
+                  (bv.marker.style.setProperty(`--k`, 1 + 2 * Math.max(0, 1 - P.elapsed / P.dur)),
+                  bv.marker.classList.toggle(`go`, Math.abs(P.elapsed - P.dur) <= goWin)),
                 P.cpuSwing != null && P.elapsed >= P.cpuSwing && ((P.cpuSwing = null), pe()),
                 u.current &&
                   P.elapsed >= endAt &&
@@ -974,6 +988,15 @@ function b() {
     },
     [S, T, A],
   );
+  // 사람 수비의 직접 견제 (타자당 2번까지). 끝나면 다시 투구 선택
+  let pickBase = (0, _.useCallback)(
+    (b) => {
+      let s = o.current;
+      if (!s.awaitPitch || s.paused || s.halfBreak || s.gameOver || !s.baseStatus[b - 1] || s.picks >= 2) return;
+      ((s.picks = (s.picks || 0) + 1), (s.awaitPitch = !1), pickoff(b, (out) => (out && oe()) || ae()));
+    },
+    [oe, ae],
+  );
   (0, _.useEffect)(() => {
     let PITCH_KEYS = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Numpad1: 1, Numpad2: 2, Numpad3: 3, Numpad4: 4 },
       // 키보드 조준(2인 대결에서 상대가 못 보게): 존 3×3 칸, Shift를 누르면 존 밖으로 (가운데는 높은 볼)
@@ -981,6 +1004,7 @@ function b() {
     let e = (e) => {
       let s = o.current;
       if (s.halfBreak && e.code === `Enter`) return (e.preventDefault(), nextHalf());
+      if (e.shiftKey && e.code in PITCH_KEYS && PITCH_KEYS[e.code] < 4 && s.awaitPitch) return (e.preventDefault(), pickBase(PITCH_KEYS[e.code]));
       if (e.code in PITCH_KEYS && s.awaitPitch) return (e.preventDefault(), pickPitch({ type: PITCH_KEYS[e.code] }));
       if (e.code in ZONE_KEYS && s.awaitPitch) {
         let [cx, cy] = ZONE_KEYS[e.code],
@@ -1093,6 +1117,7 @@ function b() {
       endInfo: j.endInfo,
       awaitPitch: j.awaitPitch,
       pitchSel: { type: j.pitchSel.type, zone: !!j.pitchSel.zone },
+      picks: j.picks || 0,
       tbRunner: j.tbRunner,
       // 주루 지시 패널: 살아있는 주자별 가능 여부
       runCtl:
@@ -1119,6 +1144,7 @@ function b() {
       setDifficulty: ye,
       nextHalf,
       pickPitch,
+      pickBase,
       runCmd: (id, cmd) => {
         let P = o.current.play;
         (P && (id === `all` ? P.commandAll(cmd) : P.command(id, cmd)), T());
@@ -1485,7 +1511,7 @@ function RunCtl({ ctl, onCmd }) {
     : null;
 }
 // 수비 투구 선택: 구종 버튼 + 존 주변 클릭으로 도달 지점
-function PitchPrompt({ show, sel, defName, onPick }) {
+function PitchPrompt({ show, sel, defName, onPick, bases, picks, onPickoff }) {
   return show
     ? (0, S.jsxs)(`div`, {
         className: `bb-pitchprompt`,
@@ -1497,6 +1523,12 @@ function PitchPrompt({ show, sel, defName, onPick }) {
               (0, S.jsx)(`button`, { className: sel.type === i + 1 ? `on` : ``, onClick: () => onPick({ type: i + 1 }), children: `${i + 1} ${name}` }, i),
             ),
           }),
+          bases.some(Boolean) &&
+            picks < 2 &&
+            (0, S.jsx)(`div`, {
+              className: `bb-pitchprompt-types pick`,
+              children: [1, 2, 3].map((b) => bases[b - 1] && (0, S.jsx)(`button`, { onClick: () => onPickoff(b), children: `⇧${b} ${b}루 견제` }, b)),
+            }),
         ],
       })
     : null;
@@ -1508,6 +1540,7 @@ var HOWTO = [
   [`투구 구종`, `1 직구 · 2 슬라이더 · 3 커브 · 4 체인지업`],
   [`투구 코스`, `존 클릭 · 또는 QWE/ASD/ZXC (⇧ 볼)`],
   [`주루`, `→ 진루 · ← 귀루 · 🏃 도루 · 견제 주의`],
+  [`견제`, `수비 때 견제 버튼 · ⇧1–3 (타자당 2번)`],
   [`일시정지`, `Esc`],
   [`5초 룰`, `타구는 5초 안에 판정 확정`],
   [`연장`, `동점이면 무사 2루 승부치기`],
@@ -1955,6 +1988,9 @@ function ce() {
                 sel: t.pitchSel,
                 defName: t.teams[1 - t.bat]?.name,
                 onPick: n.pickPitch,
+                bases: t.baseStatus,
+                picks: t.picks,
+                onPickoff: n.pickBase,
               }),
               (0, S.jsx)(ee, {
                 statusText: t.statusText,
