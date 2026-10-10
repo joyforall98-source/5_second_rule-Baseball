@@ -655,7 +655,7 @@ var BB_SIM = (() => {
   function result(P) {
     let bb = P.bb,
       st = P.st,
-      res = { bb, foul: P.foul, homeRun: P.homeRun, error: P.error, errorBy: P.error ? P.ev.key : null, distance: P.distance, outsAdded: 0, runs: 0, newBases: [...st.bases] };
+      res = { bb, foul: P.foul, homeRun: P.homeRun, error: !1, errorBy: null, distance: P.distance, outsAdded: 0, runs: 0, newBases: [...st.bases] };
     if (P.foul) {
       if (P.foulOut) {
         let why = `${BB_POS[P.foulOut]} 파울플라이`;
@@ -700,14 +700,18 @@ var BB_SIM = (() => {
       else ((why = throwWhy(batOut)), (label = `${HIT[bat.touched]} → ${baseName(batOut.base)}에서 아웃`));
     } else {
       let b = bat.state === `scored` ? 4 : Math.round(bat.s),
-        fc = bb.kind === `ground` && otherOuts.some((o) => o.force);
-      label = P.error ? `${pos} 실책 출루` : fc ? `${pos} 땅볼, 야수선택` : bb.kind === `ground` && ev.infield && b === 1 ? `내야안타` : HIT[b] || `안타`;
+        fc = (bb.kind === `ground` || P.error) && otherOuts.some((o) => o.force),
+        // 실책 기록: 더듬거나 놓쳐서 타자가 아웃 없이 살았을 때, 또는 다른 주자를 아웃시켰어도
+        // 그 틈에 타자가 2루 이상 갔을 때만. 더듬고도 타자를 아웃시켰으면 실책이 아님
+        ec = P.error && (!otherOuts.length || b >= 2);
+      ((res.error = ec), ec && (res.errorBy = ev.key));
+      label = ec ? `${pos} 실책 출루` : fc ? `${pos} ${KIND_OUT[bb.kind]}, 야수선택` : bb.kind === `ground` && ev.infield && b === 1 ? `내야안타` : HIT[b] || `안타`;
       otherOuts.length && ((why = fc ? `${baseName(otherOuts[0].base)} 포스아웃` : throwWhy(otherOuts[0])), (label += ` (주자 ${baseName(otherOuts[0].base)}에서 아웃)`));
       res.batterBase = b;
     }
     runs && !P.caught && (label = `${runs}타점 ` + label);
     let hitText = label,
-      color = why ? `#c0392b` : P.error ? `#e67e22` : /홈런/.test(label) ? `#f1c40f` : `#2ecc71`;
+      color = why ? `#c0392b` : res.error ? `#e67e22` : /홈런/.test(label) ? `#f1c40f` : `#2ecc71`;
     return Object.assign(res, {
       outsAdded: outs.length,
       runs,
@@ -715,7 +719,7 @@ var BB_SIM = (() => {
       caught: P.caught,
       fieldedBy: ev.key,
       label,
-      display: why ? bbOut(why) : P.error ? `실책!<br><span class="bb-out-reason">(${pos})</span>` : hitText,
+      display: why ? bbOut(why) : res.error ? `실책!<br><span class="bb-out-reason">(${pos})</span>` : hitText,
       color,
       status: why
         ? `${why}${runs ? ` · ${runs}점 득점` : ``}`

@@ -478,7 +478,6 @@ function b() {
         last = performance.now(),
         lastHud = 0,
         hrShown = !1,
-        errShown = !1,
         place = (el, x, yy) => {
           if (!el) return;
           let q = bbPx({ x, y: yy });
@@ -496,12 +495,6 @@ function b() {
               !P.possessed &&
               (e.distanceText = `${Math.round(Math.min(P.distance, Math.hypot(b.x, b.y)))} m`));
           for (let key in vw.fielders) place(i.current[key], vw.fielders[key].x, vw.fielders[key].y);
-          // 실책: 실책한 수비수 머리 위에 잠깐 느낌표
-          if (P.error && !errShown) {
-            errShown = !0;
-            let fe = i.current[P.ev.key];
-            fe && (fe.classList.add(`err`), setTimeout(() => fe.classList.remove(`err`), 1800));
-          }
           // 홈런: 담장을 넘는 순간 알리고, 주자들이 홈에 들어오는 장면은 계속 보여줌
           P.homeRun && !hrShown && P.t >= bb.T && ((hrShown = !0), E(`HOME RUN!`, `#f1c40f`), (e.statusText = `홈런! 주자들이 홈으로`));
           for (let rr of vw.runners) {
@@ -532,6 +525,9 @@ function b() {
           // 점수판 H·E: 안타(홈런 포함, 실책·야수선택 출루 제외)는 공격 팀, 실책은 수비 팀
           (sim.homeRun || (sim.batterBase >= 1 && !sim.caught && !sim.error && !/야수선택/.test(sim.label))) && e.teams[e.bat].h++;
           sim.error && e.teams[1 - e.bat].e++;
+          // 실책: 실책한 수비수 머리 위에 잠깐 느낌표
+          let errEl = sim.error && i.current[sim.errorBy];
+          errEl && (errEl.classList.add(`err`), setTimeout(() => errEl.classList.remove(`err`), 1800));
           ((e.outs += sim.outsAdded),
             (e.totalScore += sim.runs),
             (e.baseStatus = e.outs >= 3 ? [!1, !1, !1] : sim.newBases),
@@ -1413,23 +1409,12 @@ function ee({
         "aria-label": `점수판`,
         children: [
           (0, S.jsx)(`div`, { className: `bb-score-label`, children: `${inning}회${half === `top` ? `초 ▲` : `말 ▼`}${need > 0 ? ` · 역전 ${need}점` : ``}` }),
-          // R 안타 실책 사사구
-          (0, S.jsxs)(`div`, {
-            className: `bb-sb2-row bb-sb2-head`,
-            children: [(0, S.jsx)(`span`, {}), (0, S.jsx)(`b`, { children: `R` }), (0, S.jsx)(`i`, { children: `H` }), (0, S.jsx)(`i`, { children: `E` }), (0, S.jsx)(`i`, { children: `B` })],
-          }),
           ...teams.map((tm, k) =>
             (0, S.jsxs)(
               `div`,
               {
                 className: `bb-sb2-row${k === bat ? ` batting` : ``}`,
-                children: [
-                  (0, S.jsx)(`span`, { children: (k === bat ? `▶ ` : ``) + tm.name }),
-                  (0, S.jsx)(`b`, { children: tm.runs }),
-                  (0, S.jsx)(`i`, { children: tm.h }),
-                  (0, S.jsx)(`i`, { children: tm.e }),
-                  (0, S.jsx)(`i`, { children: tm.b }),
-                ],
+                children: [(0, S.jsx)(`span`, { children: (k === bat ? `▶ ` : ``) + tm.name }), (0, S.jsx)(`b`, { children: tm.runs })],
               },
               k,
             ),
@@ -1550,7 +1535,7 @@ function LineScore({ teams, innings, inning, half, halfRuns, bat, final: fin }) 
     children: [
       (0, S.jsx)(`thead`, {
         children: (0, S.jsxs)(`tr`, {
-          children: [(0, S.jsx)(`th`, {}), ...cols.map((c) => (0, S.jsx)(`th`, { className: c > innings ? `ext` : ``, children: c }, c)), (0, S.jsx)(`th`, { children: `R` })],
+          children: [(0, S.jsx)(`th`, {}), ...cols.map((c) => (0, S.jsx)(`th`, { className: c > innings ? `ext` : ``, children: c }, c)), ...[`R`, `H`, `E`, `B`].map((h) => (0, S.jsx)(`th`, { className: `tot`, children: h }, h))],
         }),
       }),
       (0, S.jsx)(`tbody`, {
@@ -1566,7 +1551,9 @@ function LineScore({ teams, innings, inning, half, halfRuns, bat, final: fin }) 
                   !fin && v == null && c === inning && k === bat && halfRuns != null && (v = halfRuns);
                   return (0, S.jsx)(`td`, { children: v ?? `` }, c);
                 }),
-                (0, S.jsx)(`td`, { className: `runs`, children: tm.runs }),
+                (0, S.jsx)(`td`, { className: `runs tot`, children: tm.runs }),
+                // 안타 · 실책(수비) · 사사구
+                ...[`h`, `e`, `b`].map((f) => (0, S.jsx)(`td`, { className: `heb`, children: tm[f] }, f)),
               ],
             },
             k,
