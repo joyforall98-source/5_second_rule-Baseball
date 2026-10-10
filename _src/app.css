@@ -67,8 +67,15 @@
 /* ── 2인 대결: 점수판 ── */
 .bb-sb2{min-width:130px;padding:8px 12px;text-align:left}
 .bb-sb2 .bb-score-label{text-align:center;margin-bottom:4px}
-.bb-sb2-row{display:flex;justify-content:space-between;gap:14px;font-size:15px;font-weight:800;color:#bbb;line-height:1.5}
-.bb-sb2-row b{color:#fff;font-size:18px}
+.bb-sb2-row{display:flex;align-items:baseline;gap:10px;font-size:15px;font-weight:800;color:#bbb;line-height:1.5}
+.bb-sb2-row span{flex:1;min-width:52px}
+.bb-sb2-row b{color:#fff;font-size:18px;min-width:22px;text-align:right}
+.bb-sb2-row i{font-style:normal;font-size:13px;color:#ddd;min-width:16px;text-align:right}
+.bb-sb2-head{font-size:11px;line-height:1.2;color:#888}
+.bb-sb2-head b,.bb-sb2-head i{font-size:11px;color:#888}
+.bb-defense.err::after{content:'!';position:absolute;left:50%;bottom:100%;transform:translateX(-50%);margin-bottom:2px;
+  color:#ff3b30;font-size:26px;font-weight:900;line-height:1;text-shadow:0 0 4px #000,0 0 8px #ff3b30;animation:bbErr .45s ease-in-out infinite alternate}
+@keyframes bbErr{to{transform:translateX(-50%) scale(1.35)}}
 .bb-sb2-row.batting{color:#f1c40f}
 /* 이닝별 점수표 */
 .bb-linescore{border-collapse:collapse;margin:10px auto 14px;font-size:13px;background:#ffffff0d;border-radius:6px;overflow:hidden}

@@ -445,6 +445,7 @@ function b() {
           (e.totalScore += r),
           (e.strikes = 0),
           (e.balls = 0),
+          e.teams[e.bat].b++,
           (e.statusText = n ? `밀어내기 볼넷!` : `볼넷 출루!`),
           E(n ? `밀어내기 볼넷` : `볼넷`, n ? `#f1c40f` : `#2ecc71`),
           e.hitLog.push({
@@ -460,26 +461,14 @@ function b() {
       if ((ee(), e.outs >= 3)) return halfOver();
       return walkOff() || (T(), !1);
     }, [C, T, E]),
-    // 5초 절대판정: 플레이가 5초를 넘으면 미리 계산된 결과로 즉시 확정
+    // 5초 절대판정: 타구 5초 뒤 주루 지시를 마감해 판정을 확정 (이후는 AI 주루라 결과가 정해짐).
+    // 남은 플레이는 생략하지 않고 끝까지 보여줌
     k = (0, _.useCallback)(() => {
-      ((u.current &&= (clearInterval(u.current), null)),
-        (d.current &&= (clearInterval(d.current), null)),
-        (f.current &&= (clearInterval(f.current), null)),
-        (p.current &&= (clearInterval(p.current), null)),
-        (m.current = null));
       let e = o.current;
-      (e.pendingOutcome &&
-        !e.pendingOutcome.processed &&
-        ((e.pendingOutcome.processed = !0),
-        e.pendingOutcome.resolve(!0),
-        (e.statusText = `5초 룰 확정: ${e.statusText}`)),
-        re(),
-        (e.fieldView = `top-down-view`),
-        ee(),
-        oe() || ae());
-    }, [ae, oe, E]),
-    // 타구 진행: sim.js의 플레이를 2배속으로 실시간 진행. 그동안 주자에게 진루/귀루 지시 가능.
-    // 5초가 지나면(5초 절대판정) 나머지는 즉시 계산해 결과 확정
+      ((m.current = null), e.pendingOutcome && !e.pendingOutcome.processed && e.play && ((e.play = null), (e.statusText = `5초 룰: 판정 확정`), T()));
+    }, [T]),
+    // 타구 진행: sim.js의 플레이를 2배속으로 실시간 진행. 5초 동안 주자에게 진루/귀루 지시 가능.
+    // 플레이는 홈런 주자 홈인·중계 플레이까지 끝까지 보여준 뒤 다음 투구로
     pb = (bb) => {
       let e = o.current,
         P = BB_SIM.start(bb, { bases: [...e.baseStatus], outs: e.outs, diff: e.difficulty }),
@@ -488,6 +477,8 @@ function b() {
         SPEED = 2,
         last = performance.now(),
         lastHud = 0,
+        hrShown = !1,
+        errShown = !1,
         place = (el, x, yy) => {
           if (!el) return;
           let q = bbPx({ x, y: yy });
@@ -505,6 +496,14 @@ function b() {
               !P.possessed &&
               (e.distanceText = `${Math.round(Math.min(P.distance, Math.hypot(b.x, b.y)))} m`));
           for (let key in vw.fielders) place(i.current[key], vw.fielders[key].x, vw.fielders[key].y);
+          // 실책: 실책한 수비수 머리 위에 잠깐 느낌표
+          if (P.error && !errShown) {
+            errShown = !0;
+            let fe = i.current[P.ev.key];
+            fe && (fe.classList.add(`err`), setTimeout(() => fe.classList.remove(`err`), 1800));
+          }
+          // 홈런: 담장을 넘는 순간 알리고, 주자들이 홈에 들어오는 장면은 계속 보여줌
+          P.homeRun && !hrShown && P.t >= bb.T && ((hrShown = !0), E(`HOME RUN!`, `#f1c40f`), (e.statusText = `홈런! 주자들이 홈으로`));
           for (let rr of vw.runners) {
             let el = a.current[rr.id];
             el && ((el.style.display = rr.visible ? `flex` : `none`), el.classList.toggle(`manual`, !!rr.manual), place(el, rr.x, rr.y));
@@ -514,14 +513,14 @@ function b() {
           S(() => {
             (re(), (e.fieldView = `top-down-view`), T(), oe() || S(ae, 400));
           }, ms),
-        finish = (fromRule) => {
-          ((d.current &&= (clearInterval(d.current), null)), fromRule && P.runToEnd(), draw());
+        finish = () => {
+          ((d.current &&= (clearInterval(d.current), null)), draw());
           let sim = P.result();
           e.play = null;
           for (let id of [`runner-t`, `runner-1`, `runner-2`, `runner-3`]) a.current[id]?.classList.remove(`manual`);
           if (sim.foul && !sim.foulOut) {
             (e.strikes < 2 && e.strikes++, E(`FOUL`, `#e67e22`), (e.statusText = `파울!`), T());
-            fromRule || next(700);
+            next(700);
             return;
           }
           // 끝내기: 홈런(그라운드 홈런 포함)은 모든 득점, 그 밖에는 결승점까지만 인정
@@ -530,6 +529,9 @@ function b() {
             let fix = (s) => s.replace(`${sim.runs}타점`, `${need}타점`).replace(`${sim.runs}점 득점`, `${need}점 득점`);
             sim = { ...sim, runs: need, label: fix(sim.label), display: fix(sim.display), status: fix(sim.status) };
           }
+          // 점수판 H·E: 안타(홈런 포함, 실책·야수선택 출루 제외)는 공격 팀, 실책은 수비 팀
+          (sim.homeRun || (sim.batterBase >= 1 && !sim.caught && !sim.error && !/야수선택/.test(sim.label))) && e.teams[e.bat].h++;
+          sim.error && e.teams[1 - e.bat].e++;
           ((e.outs += sim.outsAdded),
             (e.totalScore += sim.runs),
             (e.baseStatus = e.outs >= 3 ? [!1, !1, !1] : sim.newBases),
@@ -548,7 +550,7 @@ function b() {
             }),
             l(),
             T());
-          fromRule || next(1500);
+          next(1500);
         };
       ((e.stealWindow = !1),
         (e.fieldView = `top-down-view`),
@@ -556,7 +558,7 @@ function b() {
           ? `파울 타구`
           : P.homeRun
             ? `큰 타구! 넘어가나…`
-            : `${{ ground: `땅볼 타구!`, line: `라인드라이브!`, fly: `큰 타구!`, pop: `높이 뜬 타구` }[bb.kind]} → 진루 / ← 귀루`),
+            : `${{ ground: `땅볼`, line: `직선타`, fly: `뜬공`, pop: `뜬공` }[bb.kind]}! → 진루 / ← 귀루`),
         (e.distanceText = `-`),
         te(),
         ball && ((ball.style.display = `block`), (ball.style.width = ball.style.height = `8px`)),
@@ -575,7 +577,7 @@ function b() {
             last = now;
             return;
           }
-          (P.step(((now - last) / 1e3) * SPEED), (last = now), draw());
+          (P.step(((now - last) / 1e3) * (P.homeRun && P.t > bb.T ? 3 : SPEED)), (last = now), draw());
           now - lastHud > 120 && ((lastHud = now), T());
           P.done &&
             ((m.current &&= (clearTimeout(m.current), null)),
@@ -1145,7 +1147,8 @@ function b() {
     (cfg) => {
       let t = o.current,
         tga = cfg.mode === `TGA`,
-        team = (name, line = []) => ({ name, lineup: bbLineup(), batter: 1, runs: 0, line }),
+        team = (name, line = []) => ({ name, lineup: bbLineup(), batter: 1, runs: 0, line, h: 0, e: 0, b: 0 }),
+        rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1)),
         // TGA: n : n+차이 (BB_TGA). 이닝별 점수는 합계에 맞게 무작위 배분
         n = Math.floor(Math.random() * 7),
         gap = tga ? BB_TGA[cfg.diff].gap : 0,
@@ -1170,7 +1173,11 @@ function b() {
             : tga
               ? [team(`CPU`, spread(n + gap, 9)), team(`나`, spread(n, 8))]
               : [team(`CPU`), team(`나`)]),
-        tga && ((t.teams[0].runs = n + gap), (t.teams[1].runs = n)),
+        // TGA는 8회까지의 기록도 점수에 어울리게 채움
+        tga &&
+          t.teams.forEach((tm, k) =>
+            Object.assign(tm, { runs: k ? n : n + gap, h: (k ? n : n + gap) + rint(2, 5), e: rint(0, 1), b: rint(0, 3) }),
+          ),
         loadTeam(),
         ae(),
         T());
@@ -1406,12 +1413,23 @@ function ee({
         "aria-label": `점수판`,
         children: [
           (0, S.jsx)(`div`, { className: `bb-score-label`, children: `${inning}회${half === `top` ? `초 ▲` : `말 ▼`}${need > 0 ? ` · 역전 ${need}점` : ``}` }),
+          // R 안타 실책 사사구
+          (0, S.jsxs)(`div`, {
+            className: `bb-sb2-row bb-sb2-head`,
+            children: [(0, S.jsx)(`span`, {}), (0, S.jsx)(`b`, { children: `R` }), (0, S.jsx)(`i`, { children: `H` }), (0, S.jsx)(`i`, { children: `E` }), (0, S.jsx)(`i`, { children: `B` })],
+          }),
           ...teams.map((tm, k) =>
             (0, S.jsxs)(
               `div`,
               {
                 className: `bb-sb2-row${k === bat ? ` batting` : ``}`,
-                children: [(0, S.jsx)(`span`, { children: (k === bat ? `▶ ` : ``) + tm.name }), (0, S.jsx)(`b`, { children: tm.runs })],
+                children: [
+                  (0, S.jsx)(`span`, { children: (k === bat ? `▶ ` : ``) + tm.name }),
+                  (0, S.jsx)(`b`, { children: tm.runs }),
+                  (0, S.jsx)(`i`, { children: tm.h }),
+                  (0, S.jsx)(`i`, { children: tm.e }),
+                  (0, S.jsx)(`i`, { children: tm.b }),
+                ],
               },
               k,
             ),
@@ -1671,7 +1689,7 @@ var HOWTO = [
   [`견제 동작`, `← 빨리 귀루하면 세이프 · 스타트하면 런다운`],
   [`견제`, `수비 때 견제 버튼 · ⇧1–3 (타자당 2번)`],
   [`일시정지`, `Esc`],
-  [`5초 룰`, `타구는 5초 안에 판정 확정`],
+  [`5초 룰`, `타구 5초 뒤 주루 지시 마감, 판정 확정`],
   [`연장`, `동점이면 무사 2루 승부치기`],
   [`콜드`, `5회 15점 · 7회 10점 차 (5·9이닝)`],
   [`TGA`, `9회말 2·4·5점 차(EASY·SOSO·HARD) — 역전`],

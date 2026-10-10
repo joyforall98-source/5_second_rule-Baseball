@@ -59,7 +59,7 @@ var BB_SIM = (() => {
     OF = [`out-lf`, `out-cf`, `out-rf`],
     HIT = [``, `안타`, `2루타`, `3루타`, `그라운드 홈런`],
     HR = [``, `솔로 홈런`, `투런 홈런`, `스리런 홈런`, `만루 홈런`],
-    KIND_OUT = { fly: `뜬공`, line: `직선타`, pop: `팝플라이`, ground: `땅볼` },
+    KIND_OUT = { fly: `뜬공`, line: `직선타`, pop: `뜬공`, ground: `땅볼` },
     // 난이도별 수비 능력. EASY는 송구가 느리고(21m/s) 수비 반응이 늦음. 주자 속도(run)는 같음
     cfg = (diff) =>
       diff === `HARD`
@@ -80,8 +80,8 @@ var BB_SIM = (() => {
       let D = rnd(15, 70);
       return { kind: `fly`, foul: !0, phi: p, D, T: 1.6 + D / 26 + rnd(0, 1) };
     }
-    // 발사각(타구 종류)은 실제 비율에 가깝게: 땅볼 40% · 라이너 22% · 뜬공 30% · 팝업 8%
-    // 타이밍(q)은 타구 속도/비거리를 정함. 빗맞으면 땅볼·팝업 비중이 커짐
+    // 발사각(타구 종류)은 실제 비율에 가깝게: 땅볼 40% · 직선타 22% · 뜬공 30% · 높이 뜬 내야 뜬공(pop) 8%
+    // 타이밍(q)은 타구 속도/비거리를 정함. 빗맞으면 땅볼·내야 뜬공 비중이 커짐
     let wPop = 0.06 + 0.12 * (1 - q),
       wGround = 0.4 + 0.15 * (1 - q),
       r = R() * (wGround + 0.22 + 0.3 + wPop);
@@ -263,7 +263,7 @@ var BB_SIM = (() => {
           hWall = 1 - f + 4 * H * f * (1 - f);
         if (hWall >= BB_WALL_H) {
           // 홈런: 모든 주자가 홈까지 (수비 없음)
-          (arc({ x: 0, y: 0 }, L, 0, bb.T, H), (P.homeRun = !0), (P.fixedEnd = bb.T + 1.4));
+          (arc({ x: 0, y: 0 }, L, 0, bb.T, H), (P.homeRun = !0), (P.fixedEnd = 1e9)); // 끝은 모든 주자 홈인 때
           for (let r of P.r) ((r.state = `run`), (r.target = 4), (r.delay = 0.3), (r.manual = !0), (r.trot = !0));
           return wrap(P);
         }
@@ -276,12 +276,12 @@ var BB_SIM = (() => {
         (roll(rest, tw, o.t), (P.wallBall = !0), (P.landT = tw));
         ev = { key: o.key, t: o.t, p: o.p, ready: o.t + c.transfer + 0.15 };
       } else {
-        // 팝업은 투수 대신 야수·포수가 잡음
+        // 높이 뜬 내야 뜬공은 투수 대신 야수·포수가 잡음
         let keys = bb.kind === `pop` ? [...IF.filter((k) => k !== `pitcher`), `catcher`, ...OF] : [...OF, ...IF],
           slack = bb.kind === `line` ? 1.0 : 1.6,
           best = null;
         for (let k of keys) {
-          let n = need(k, L, slack) + (bb.kind === `line` ? 0.2 : 0); // 라이너는 첫 판단이 늦음
+          let n = need(k, L, slack) + (bb.kind === `line` ? 0.2 : 0); // 직선타는 첫 판단이 늦음
           n <= bb.T + (bb.kind === `line` ? 0 : 0.1) && (!best || n < best.n) && (best = { k, n });
         }
         if (best && R() > c.flyErr) {
@@ -336,7 +336,7 @@ var BB_SIM = (() => {
         else if (r.from === 2 && bb.phi > 8) ((r.state = `run`), (r.delay = 0.1), (r.target = 3));
         else if (r.from === 3 && (ev.key === `inf-1b` || ev.key === `inf-2b`)) ((r.state = `run`), (r.delay = 0.1), (r.target = 4));
       } else {
-        // 뜬공·라이너: 리드한 채로 타구를 지켜봄
+        // 뜬공·직선타: 리드한 채로 타구를 지켜봄
         ((r.state = `wait`),
           (r.holdS = r.from + (bb.kind === `pop` ? 0.1 : bb.kind === `line` ? 0.06 : clamp(0.12 + (bb.D || 0) / 400, 0.12, 0.42))));
       }
@@ -572,9 +572,9 @@ var BB_SIM = (() => {
             if (P.done) return;
           } else r.s = ns;
         }
-        // 고정 종료(홈런·파울)
+        // 고정 종료(파울), 홈런은 모든 주자가 홈에 들어오면
         if (P.fixedEnd != null) {
-          t >= P.fixedEnd && finish();
+          (t >= P.fixedEnd || (P.homeRun && !P.r.some(live))) && finish();
           return;
         }
         // 수비
@@ -655,7 +655,7 @@ var BB_SIM = (() => {
   function result(P) {
     let bb = P.bb,
       st = P.st,
-      res = { bb, foul: P.foul, homeRun: P.homeRun, distance: P.distance, outsAdded: 0, runs: 0, newBases: [...st.bases] };
+      res = { bb, foul: P.foul, homeRun: P.homeRun, error: P.error, errorBy: P.error ? P.ev.key : null, distance: P.distance, outsAdded: 0, runs: 0, newBases: [...st.bases] };
     if (P.foul) {
       if (P.foulOut) {
         let why = `${BB_POS[P.foulOut]} 파울플라이`;
