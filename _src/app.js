@@ -479,6 +479,7 @@ function b() {
         lastHud = 0,
         hrShown = !1,
         errShown = !1,
+        acc = 0, // 아직 진행하지 않은 시뮬레이션 시간(초)
         place = (el, x, yy) => {
           if (!el) return;
           let q = bbPx({ x, y: yy });
@@ -579,7 +580,9 @@ function b() {
             last = now;
             return;
           }
-          (P.step(((now - last) / 1e3) * (P.homeRun && P.t > bb.T ? 3 : SPEED)), (last = now), draw());
+          // 시뮬레이션은 0.02초씩 일정하게 진행 (화면 프레임 간격과 상관없이 결과가 같도록. DEMO 결과 = demotest.js)
+          for (acc += ((now - last) / 1e3) * (P.homeRun && P.t > bb.T ? 3 : SPEED); acc >= 0.02 && !P.done; acc -= 0.02) P.step(0.02);
+          ((last = now), draw());
           now - lastHud > 120 && ((lastHud = now), T());
           P.done &&
             ((m.current &&= (clearTimeout(m.current), null)),
@@ -1148,6 +1151,14 @@ function b() {
   }, [pe, A, _e, ve, S, T, pickPitch]);
   // 경기 시작: { mode: TGA|1P|2P, diff: EASY|SOSO(TGA 전용)|HARD, innings }. 타순별 좌/우타는 여기서 확정되어 경기 내내 유지
   // 컴퓨터 대결은 컴퓨터가 선공(초), 플레이어가 후공(말). TGA는 9회말 n : n+차이에서 시작하는 역전 미션
+  // 수비수를 지정한 위치로 (없는 수비수는 기본 위치)
+  let placeFielders = (map) => {
+    for (let k in BB_FIELD_M) {
+      let el = i.current[k],
+        q = bbPx((map && map[k]) || BB_FIELD_M[k]);
+      el && ((el.style.bottom = q.bottom + `px`), (el.style.left = q.left + `%`));
+    }
+  };
   // DEMO MODE: 상황 카드 시작. vi는 카드의 타자 유형(variant), 없으면 무작위
   let startDemo = (0, _.useCallback)(
     (ci, vi) => {
@@ -1166,19 +1177,14 @@ function b() {
         (t.outs = c.outs),
         (t.baseStatus = [...c.bases]),
         (t.demo = { ci, vi, c, phase: `ask`, pick: null }),
-        (t.demoSim = { demo: !0, fielders: c.fielders, batRun: c.batRun }),
+        (t.demoSim = bbDemoSim(c, {})),
         (t.playballDisabled = !0),
         (t.swingDisabled = !0),
         (t.awaitPitch = !1),
         (t.fieldView = `top-down-view`),
         (t.statusText = `${c.title}: 전략을 골라 보세요`),
         ie());
-      // 카드의 수비 위치로 옮겨 보여줌
-      for (let k in c.fielders || {}) {
-        let el = i.current[k],
-          q = bbPx(c.fielders[k]);
-        el && ((el.style.bottom = q.bottom + `px`), (el.style.left = q.left + `%`));
-      }
+      placeFielders(c.fielders);
       T();
     },
     [T],
@@ -1188,11 +1194,13 @@ function b() {
       let t = o.current,
         dm = t.demo;
       if (!dm || dm.phase !== `ask`) return;
-      let op = dm.c.options[oi];
-      ((dm.phase = `play`), (dm.pick = oi), (t.demoSim = { ...t.demoSim, orders: op.orders }), (t.isPitched = !0), (t.statusText = `${op.label}!`), T());
-      pb({ ...op.bb });
+      let op = dm.c.options[oi],
+        move = op.fielders !== void 0; // 수비 위치를 바꾸는 선택이면 먼저 옮겨 보여줌
+      ((dm.phase = `play`), (dm.pick = oi), (t.demoSim = bbDemoSim(dm.c, op)), (t.isPitched = !0), (t.statusText = `${op.label}!`), T());
+      move && placeFielders(op.fielders);
+      S(() => pb({ ...op.bb }), move ? 900 : 0);
     },
-    [T],
+    [S, T],
   );
   let demoList = (0, _.useCallback)(() => (me(), (o.current.menuStep = `demo`), T()), [T]);
   let ye = (0, _.useCallback)(
@@ -1689,9 +1697,9 @@ function DemoPanel({ demo, onPick, onRetry, onNext, onList }) {
   if (!demo || demo.phase === `play`) return null;
   let c = demo.c,
     occ = [1, 2, 3].filter((b) => c.bases[b - 1]),
-    sit = `${c.outs ? `${c.outs}사` : `무사`} ${occ.length ? `${occ.join('·')}루` : `주자 없음`} · 타자: ${c.batter}`,
+    sit = `${c.outs ? `${c.outs}사` : `무사`} ${occ.length ? `${occ.join('·')}루` : `주자 없음`} · ${c.side === `def` ? `상대 타자` : `타자`}: ${c.batter}`,
     op = demo.pick != null ? c.options[demo.pick] : null,
-    head = (0, S.jsx)(`h3`, { children: `공격 ${demo.ci + 1} · ${c.title}` });
+    head = (0, S.jsx)(`h3`, { children: `${bbDemoName(demo.ci)} · ${c.title}` });
   return demo.phase === `ask`
     ? (0, S.jsxs)(`div`, {
         className: `bb-demo`,
@@ -1778,7 +1786,7 @@ var HOWTO = [
   [`연장`, `동점이면 무사 2루 승부치기`],
   [`콜드`, `5회 15점 · 7회 10점 차 (5·9이닝)`],
   [`TGA`, `9회말 2·4·5점 차(EASY·SOSO·HARD) — 역전`],
-  [`DEMO`, `상황 카드로 공격 전략 배우기 (선택 → 플레이 → 해설)`],
+  [`DEMO`, `상황 카드로 공격·수비 전략 배우기 (선택 → 플레이 → 해설)`],
 ];
 function HowTo() {
   return (0, S.jsx)(`div`, {
@@ -2035,8 +2043,26 @@ function oe({ visible: e, onSelect: t, initStep }) {
       ],
       // 상황 카드 목록 (수비 전략은 다음에 추가)
       demo: [
-        (0, S.jsx)(`div`, { className: `bb-demo-head`, children: `공격 전략: 상황을 보고 가장 좋은 작전을 골라 보세요` }, `h`),
-        ...BB_DEMO.map((c, i) => btn(`공격 ${i + 1} · ${c.title}`, () => t({ mode: `DEMO`, card: i }))),
+        (0, S.jsx)(`div`, { className: `bb-demo-head`, children: `상황을 보고 가장 좋은 작전을 골라 보세요` }, `h`),
+        (0, S.jsx)(
+          `div`,
+          {
+            className: `bb-demo-list`,
+            children: [`atk`, `def`].map((side) =>
+              (0, S.jsxs)(
+                `div`,
+                {
+                  children: [
+                    (0, S.jsx)(`b`, { children: side === `def` ? `🛡️ 수비 전략` : `🏏 공격 전략` }),
+                    ...BB_DEMO.map((c, i) => ((c.side === `def`) === (side === `def`) ? btn(`${bbDemoName(i)} · ${c.title}`, () => t({ mode: `DEMO`, card: i })) : null)),
+                  ],
+                },
+                side,
+              ),
+            ),
+          },
+          `l`,
+        ),
         back(`mode`),
       ],
       diff: [
@@ -2074,7 +2100,7 @@ function oe({ visible: e, onSelect: t, initStep }) {
     "aria-label": `메인 화면`,
     children: (0, S.jsxs)(`div`, {
       className: `bb-pause-card bb-menu`,
-      children: [(0, S.jsx)(`div`, { className: `bb-main-title`, children: `⚾ 5초 절대판정 베이스볼` }), ...body],
+      children: [(0, S.jsx)(`div`, { className: `bb-main-title`, children: `⚾ 베이스볼 전략 교실` }), ...body],
     }),
   });
 }
@@ -2104,7 +2130,7 @@ var BB_SCENE = (() => {
 <rect x="0" y="178" width="850" height="20" fill="#1f5130"/>
 <rect x="0" y="177" width="850" height="2.5" fill="#f1c40f"/>
 <g font-family="Malgun Gothic,sans-serif" font-weight="900" font-size="11" text-anchor="middle">
-<rect x="120" y="182" width="120" height="13" fill="#c0392b"/><text x="180" y="192.5" fill="#fff">5초 절대판정</text>
+<rect x="120" y="182" width="120" height="13" fill="#c0392b"/><text x="180" y="192.5" fill="#fff">전략 교실</text>
 <rect x="610" y="182" width="120" height="13" fill="#2980b9"/><text x="670" y="192.5" fill="#fff">BASEBALL</text></g>
 <rect x="0" y="196" width="850" height="384" fill="#3c8e45"/>
 <g clip-path="url(#bvGrassClip)">${fan}</g>

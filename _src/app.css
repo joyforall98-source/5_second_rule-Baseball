@@ -40,6 +40,11 @@
 .bb-tga-intro-title{font-weight:900;color:#f39c12;margin-bottom:4px}
 .bb-tga-intro ul{margin:0;padding-left:18px}
 .bb-tga-intro li+li{margin-top:3px}
+.bb-demo-list{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.bb-demo-list>div{display:flex;flex-direction:column;gap:6px}
+.bb-demo-list b{font-size:13px;color:#f1c40f;text-align:left}
+.bb-demo-list .bb-btn{font-size:12.5px;padding:8px 10px;text-align:left}
+@media (max-width:640px){.bb-demo-list{grid-template-columns:1fr}}
 .bb-demo-head{font-size:13px;color:#bbb;margin:2px 0 4px;text-align:left}
 .bb-demo{position:absolute;left:50%;top:10px;transform:translateX(-50%);width:min(430px,92%);z-index:30;background:#000000e6;border:1px solid #3498db;
   border-radius:10px;padding:12px 14px;color:#eee;font-size:13.5px;line-height:1.55;text-align:left}

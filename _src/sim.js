@@ -115,7 +115,9 @@ var BB_SIM = (() => {
   // ────────────────────────────────────────────────────────────────
   // 플레이 시작. st = { bases:[1루,2루,3루], outs, diff }
   // DEMO 상황용(없으면 기존과 같음): fielders 수비 위치 덮어쓰기, demo 실책·무작위 없음,
-  // batRun 타자 주력(m/s), orders [{ t, id, base }] 정해진 시각에 주자 지시
+  // batRun 타자 주력(m/s), orders [{ t, id, base }] 정해진 시각에 주자 지시,
+  // miss 뜬공·직선타를 수비수가 뒤로 빠뜨림(backup이면 다른 수비수가 받아 줌, 아니면 놓친 수비수가 쫓아감),
+  // firstThrow { base, carry } 공을 잡은 수비수의 첫 송구(carry면 공을 들고 그 베이스까지 뜀)
   function start(bb, st) {
     let FM = st.fielders ? { ...BB_FIELD_M, ...st.fielders } : BB_FIELD_M,
       c = cfg(st.diff),
@@ -290,20 +292,31 @@ var BB_SIM = (() => {
           let n = need(k, L, slack) + (bb.kind === `line` ? 0.2 : 0); // 직선타는 첫 판단이 늦음
           n <= bb.T + (bb.kind === `line` ? 0 : 0.1) && (!best || n < best.n) && (best = { k, n });
         }
-        if (best && (st.demo || R() > c.flyErr)) {
+        if (best && !st.miss && (st.demo || R() > c.flyErr)) {
           arc({ x: 0, y: 0 }, L, 0, bb.T, H, 1, 2);
           ev = { key: best.k, t: bb.T, p: L, catch: !0, ready: bb.T + c.transfer + 0.1 };
         } else {
           let err = !!best,
-            rl = bb.kind === `line` ? rnd(12, 28) : bb.kind === `pop` ? rnd(1, 4) : rnd(5, 14),
+            miss = err && st.miss, // 뒤로 빠뜨려 공이 굴러감
+            pick = (a, b) => (st.demo ? (a + b) / 2 : rnd(a, b)), // DEMO는 가운데 값으로 고정
+            rl = miss ? 30 : bb.kind === `line` ? pick(12, 28) : bb.kind === `pop` ? pick(1, 4) : pick(5, 14),
             end = Math.min(bb.D + rl, fence - 1.5),
             rest = (t) => at(bb.phi, bb.D + (end - bb.D) * (1 - Math.exp(-(t - bb.T) / 0.6)));
           arc({ x: 0, y: 0 }, L, 0, bb.T, H);
-          let o = err
-            ? { key: best.k, t: bb.T + 0.9, p: L }
-            : interceptOr([...OF, ...IF], (t) => (t < bb.T ? L : rest(t)), bb.T, bb.T + 8, 1.0);
-          (roll(err ? () => L : rest, bb.T, o.t), (P.landT = bb.T));
-          ev = { key: o.key, t: o.t, p: o.p, error: err, ready: o.t + c.transfer + 0.15 };
+          // 뒤로 빠뜨렸을 때: 백업이 있으면 다른 수비수가 받고, 없으면 놓친 수비수가 몸을 돌려(0.8초) 쫓아감
+          let chase = () => {
+              let t = bb.T;
+              while (t < bb.T + 12 && bb.T + 0.8 + Math.max(0, dist(L, rest(t)) - 1) / spd(best.k) > t) t += 0.05;
+              return { key: best.k, t, p: rest(t) };
+            },
+            o =
+              err && !miss
+                ? { key: best.k, t: bb.T + 0.9, p: L }
+                : miss && !st.backup
+                  ? chase()
+                  : interceptOr([...OF, ...IF].filter((k) => !miss || k !== best.k), (t) => (t < bb.T ? L : rest(t)), bb.T, bb.T + 12, 1.0);
+          (roll(err && !miss ? () => L : rest, bb.T, o.t), (P.landT = bb.T));
+          ev = { key: o.key, t: o.t, p: o.p, error: err, errBy: err ? best.k : null, missP: L, ready: o.t + c.transfer + 0.15 };
         }
       }
       ev.catch && (P.landT = bb.T);
@@ -327,6 +340,7 @@ var BB_SIM = (() => {
         let f = P.f[k];
         f.goal = lerp(f, ev.p, 0.3); // 다른 외야수는 백업
       }
+    ev.errBy && ev.errBy !== ev.key && (P.f[ev.errBy].goal = { ...ev.missP });
 
     // ── 주자 출발 ──
     let two = st.outs === 2;
@@ -415,13 +429,13 @@ var BB_SIM = (() => {
         for (let i = 0; i < idx(r); i++) P.r[i].forced = !1;
         P.st.outs + P.outs.length >= 3 && finish();
       },
-      throwTo = (k) => {
+      throwTo = (k, carry) => {
         let h = P.f[P.holder],
           from = { x: h.x, y: h.y },
           to = BB_BASES[k],
           d = dist(from, to),
-          tt = d < 7 ? d / c.ifSpd + 0.1 : thrT(from, k), // 가까우면 직접 들고 뛰어감
-          rec = P.cover[k] === P.holder ? P.holder : P.cover[k];
+          tt = carry || d < 7 ? d / c.ifSpd + 0.1 : thrT(from, k), // 가까우면 직접 들고 뛰어감
+          rec = carry || P.cover[k] === P.holder ? P.holder : P.cover[k];
         ((P.ball = { mode: `thrown`, from, to, t0: P.t, t1: P.t + tt, toBase: k, receiver: rec, by: P.holder, x: from.x, y: from.y, h: 1.5 }),
           (P.holderBase = null),
           P.throws++,
@@ -433,6 +447,8 @@ var BB_SIM = (() => {
       // 수비 판단: 공을 가진 선수가 아웃시킬 수 있는 주자에게 송구
       defense = () => {
         if (P.throws >= 6) return !1;
+        let ft = P.st.firstThrow;
+        if (ft && !P.throws) return (throwTo(ft.base, ft.carry), !0); // DEMO: 정해진 첫 송구
         let h = P.f[P.holder],
           best = null;
         for (let r of P.r) {
@@ -721,8 +737,8 @@ var BB_SIM = (() => {
         // (타자가 몇 루까지 갔든) 야수선택, 더듬고도 타자를 아웃시켰으면 실책이 아님
         ec = P.error && !otherOuts.length,
         fc = otherOuts.length > 0 && (P.error || (bb.kind === `ground` && otherOuts.some((o) => o.force)));
-      ((res.error = ec), ec && (res.errorBy = ev.key));
-      label = ec ? `${pos} 실책 출루` : fc ? `${pos} ${KIND_OUT[bb.kind]}, 야수선택` : bb.kind === `ground` && ev.infield && b === 1 ? `내야안타` : HIT[b] || `안타`;
+      ((res.error = ec), ec && (res.errorBy = ev.errBy || ev.key));
+      label = ec ? `${BB_POS[ev.errBy || ev.key]} 실책 출루` : fc ? `${pos} ${KIND_OUT[bb.kind]}, 야수선택` : bb.kind === `ground` && ev.infield && b === 1 ? `내야안타` : HIT[b] || `안타`;
       otherOuts.length && ((why = otherOuts[0].force ? `${baseName(otherOuts[0].base)} 포스아웃` : throwWhy(otherOuts[0])), (label += ` (주자 ${baseName(otherOuts[0].base)}에서 아웃)`));
       res.batterBase = b;
     }
@@ -736,7 +752,7 @@ var BB_SIM = (() => {
       caught: P.caught,
       fieldedBy: ev.key,
       label,
-      display: why ? bbOut(why) : res.error ? `실책!<br><span class="bb-out-reason">(${pos})</span>` : hitText,
+      display: why ? bbOut(why) : res.error ? `실책!<br><span class="bb-out-reason">(${BB_POS[ev.errBy || ev.key]})</span>` : hitText,
       color,
       status: why
         ? `${why}${runs ? ` · ${runs}점 득점` : ``}`
