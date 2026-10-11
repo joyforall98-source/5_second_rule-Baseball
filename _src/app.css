@@ -40,6 +40,21 @@
 .bb-tga-intro-title{font-weight:900;color:#f39c12;margin-bottom:4px}
 .bb-tga-intro ul{margin:0;padding-left:18px}
 .bb-tga-intro li+li{margin-top:3px}
+.bb-demo-head{font-size:13px;color:#bbb;margin:2px 0 4px;text-align:left}
+.bb-demo{position:absolute;left:50%;top:10px;transform:translateX(-50%);width:min(430px,92%);z-index:30;background:#000000e6;border:1px solid #3498db;
+  border-radius:10px;padding:12px 14px;color:#eee;font-size:13.5px;line-height:1.55;text-align:left}
+.bb-demo h3{margin:0 0 2px;font-size:15px;color:#5dade2}
+.bb-demo .sit{color:#bbb;font-size:12.5px}
+.bb-demo .ask{margin:6px 0 8px;font-weight:800}
+.bb-demo .opts{display:flex;flex-direction:column;gap:6px}
+.bb-demo button{cursor:pointer;border:none;border-radius:6px;padding:8px 10px;font:inherit;font-weight:800;color:#fff;background:#2c3e50;text-align:left}
+.bb-demo button:hover{background:#2980b9}
+.bb-demo .note{margin-top:8px;font-size:11.5px;color:#999}
+.bb-demo .verdict{font-size:17px;font-weight:900;margin:2px 0}
+.bb-demo .verdict.good{color:#2ecc71}
+.bb-demo .verdict.bad{color:#f39c12}
+.bb-demo .row{display:flex;gap:6px;margin-top:10px}
+.bb-demo .row button{flex:1;text-align:center}
 .bb-tga-intro-outro{margin:8px 0 0;text-align:center;font-weight:800;color:#f1c40f}
 .bb-runalert{border-color:#e67e22;animation:bbWarn .5s ease-in-out infinite alternate}
 .bb-runalert .bb-pitchprompt-title{color:#f39c12}

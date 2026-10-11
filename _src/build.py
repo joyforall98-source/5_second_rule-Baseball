@@ -9,8 +9,8 @@ here = pathlib.Path(__file__).resolve().parent
 # 결과물: 이 폴더의 index.html은 GitHub 주소로 넘기는 안내 페이지이므로 index-beforefix.html에 빌드
 html_path = here.parent / "index.html"
 html = html_path.read_text(encoding="utf-8")
-# sim.js(타구·수비 계산), rig.js(타자·투수 동작)를 먼저 넣고 app.js(화면·진행)가 그것을 사용
-app = "\n".join((here / f).read_text(encoding="utf-8") for f in ("sim.js", "rig.js", "app.js"))
+# sim.js(타구·수비 계산), demo.js(DEMO 상황 카드), rig.js(타자·투수 동작)를 먼저 넣고 app.js(화면·진행)가 그것을 사용
+app = "\n".join((here / f).read_text(encoding="utf-8") for f in ("sim.js", "demo.js", "rig.js", "app.js"))
 css = (here / "app.css").read_text(encoding="utf-8")
 
 JS_START, JS_END = "/*APP_START*/", "/*APP_END*/"

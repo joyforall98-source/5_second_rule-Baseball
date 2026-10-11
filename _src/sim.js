@@ -114,8 +114,11 @@ var BB_SIM = (() => {
 
   // ────────────────────────────────────────────────────────────────
   // 플레이 시작. st = { bases:[1루,2루,3루], outs, diff }
+  // DEMO 상황용(없으면 기존과 같음): fielders 수비 위치 덮어쓰기, demo 실책·무작위 없음,
+  // batRun 타자 주력(m/s), orders [{ t, id, base }] 정해진 시각에 주자 지시
   function start(bb, st) {
-    let c = cfg(st.diff),
+    let FM = st.fielders ? { ...BB_FIELD_M, ...st.fielders } : BB_FIELD_M,
+      c = cfg(st.diff),
       bases = st.bases,
       P = {
         t: 0,
@@ -143,11 +146,12 @@ var BB_SIM = (() => {
         holder: null,
         holderBase: null,
         readyAt: 0,
+        oi: 0, // 처리한 orders 수
         cover: { 1: `inf-1b`, 2: `inf-ss`, 3: `inf-3b`, 4: `catcher` },
         ev: null,
       };
-    for (let k in BB_FIELD_M) {
-      let m = BB_FIELD_M[k];
+    for (let k in FM) {
+      let m = FM[k];
       P.f[k] = {
         x: m.x,
         y: m.y,
@@ -168,17 +172,18 @@ var BB_SIM = (() => {
       forced: !1,
       tagIntent: !1,
       retouch: !1,
-      margin: rnd(0, 0.8), // 주자 성향: 작을수록 과감한 주루
+      margin: st.demo ? 0.3 : rnd(0, 0.8), // 주자 성향: 작을수록 과감한 주루
       holdS: from,
       outT: null,
       scoredT: null,
     });
     for (let b of [3, 2, 1]) bases[b - 1] && P.r.push(mk(`runner-${b}`, b));
     let bat = mk(`runner-t`, 0);
+    st.batRun && (bat.run = st.batRun);
     (P.r.push(bat), (P.bat = bat));
 
     let spd = (k) => P.f[k].spd,
-      need = (k, p, slack) => P.f[k].startAt + Math.max(0, dist(BB_FIELD_M[k], p) - slack) / spd(k),
+      need = (k, p, slack) => P.f[k].startAt + Math.max(0, dist(FM[k], p) - slack) / spd(k),
       track = P.ball.track,
       arc = (from, to, t0, t1, H, h0 = 1, h1 = 0) => {
         let n = Math.max(2, Math.ceil((t1 - t0) / 0.08));
@@ -212,7 +217,7 @@ var BB_SIM = (() => {
         intercept(keys, fn, t0, t1, slack) ||
         (() => {
           let p = fn(t1),
-            k = keys.reduce((a, b) => (dist(BB_FIELD_M[a], p) < dist(BB_FIELD_M[b], p) ? a : b));
+            k = keys.reduce((a, b) => (dist(FM[a], p) < dist(FM[b], p) ? a : b));
           return { key: k, t: Math.max(t1, need(k, p, 1)), p, n: need(k, p, 1) };
         })();
 
@@ -231,7 +236,7 @@ var BB_SIM = (() => {
           let n = need(k, L, 1.5);
           n <= bb.T + 0.1 && (!best || n < best.n) && (best = { k, n });
         }
-      if (best && R() > c.flyErr) {
+      if (best && (st.demo || R() > c.flyErr)) {
         (arc({ x: 0, y: 0 }, L, 0, bb.T, H, 1, 2), (P.f[best.k].goal = L), (P.foulOut = best.k));
         return ((P.fixedEnd = bb.T + 0.8), wrap(P));
       }
@@ -248,7 +253,7 @@ var BB_SIM = (() => {
       while (s(tPast) < 50 && tPast < 6) tPast += 0.05;
       let f = intercept(IF, g, 0.15, tPast, 1.0);
       if (f) {
-        let err = R() < c.gbErr;
+        let err = !st.demo && R() < c.gbErr;
         ev = { key: f.key, t: f.t, p: f.p, infield: !0, error: err, ready: f.t + c.transfer + (err ? 1.4 : 0) };
       } else {
         let o = interceptOr(OF, g, tPast, 10, 1.0);
@@ -285,7 +290,7 @@ var BB_SIM = (() => {
           let n = need(k, L, slack) + (bb.kind === `line` ? 0.2 : 0); // 직선타는 첫 판단이 늦음
           n <= bb.T + (bb.kind === `line` ? 0 : 0.1) && (!best || n < best.n) && (best = { k, n });
         }
-        if (best && R() > c.flyErr) {
+        if (best && (st.demo || R() > c.flyErr)) {
           arc({ x: 0, y: 0 }, L, 0, bb.T, H, 1, 2);
           ev = { key: best.k, t: bb.T, p: L, catch: !0, ready: bb.T + c.transfer + 0.1 };
         } else {
@@ -351,7 +356,7 @@ var BB_SIM = (() => {
     let c = P.c,
       bat = P.bat,
       live = (r) => r.state !== `out` && r.state !== `scored`,
-      speed = (r) => (r.trot ? 6 : c.run * (r.touched >= 1 || r.from > 0 ? 1.08 : 1)) / BB_LEG, // 베이스/초
+      speed = (r) => (r.trot ? 6 : (r.run || c.run) * (r.touched >= 1 || r.from > 0 ? 1.08 : 1)) / BB_LEG, // 베이스/초
       thrT = (p, k) => {
         let d = dist(p, BB_BASES[k]);
         return d / c.thr + (d > 62 ? 0.45 : 0); // 62m 넘으면 중계
@@ -555,6 +560,12 @@ var BB_SIM = (() => {
           ((b.x = f.x), (b.y = f.y));
         }
         if (P.done) return;
+        // DEMO: 정해진 시각의 주자 지시 (플레이어가 지시한 것처럼 AI가 바꾸지 않음)
+        for (let os = P.st.orders || []; P.oi < os.length && t >= os[P.oi].t; P.oi++) {
+          let o = os[P.oi],
+            r = P.r.find((x) => x.id === o.id);
+          r && live(r) && ((r.manual = !0), setTarget(r, o.base));
+        }
         // 주자
         for (let r of P.r) {
           if (!live(r)) continue;

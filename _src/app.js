@@ -471,7 +471,7 @@ function b() {
     // 플레이는 홈런 주자 홈인·중계 플레이까지 끝까지 보여준 뒤 다음 투구로
     pb = (bb) => {
       let e = o.current,
-        P = BB_SIM.start(bb, { bases: [...e.baseStatus], outs: e.outs, diff: e.difficulty }),
+        P = BB_SIM.start(bb, { bases: [...e.baseStatus], outs: e.outs, diff: e.difficulty, ...(e.mode === `DEMO` ? e.demoSim : null) }),
         ball = t.current,
         shadow = i.current.__shadow,
         SPEED = 2,
@@ -525,7 +525,7 @@ function b() {
           }
           // 끝내기: 홈런(그라운드 홈런 포함)은 모든 득점, 그 밖에는 결승점까지만 인정
           let need = e.teams[0].runs + 1 - e.totalScore;
-          if (e.half === `bottom` && e.inning >= e.innings && !sim.homeRun && sim.batterBase !== 4 && need > 0 && sim.runs > need) {
+          if (e.mode !== `DEMO` && e.half === `bottom` && e.inning >= e.innings && !sim.homeRun && sim.batterBase !== 4 && need > 0 && sim.runs > need) {
             let fix = (s) => s.replace(`${sim.runs}타점`, `${need}타점`).replace(`${sim.runs}점 득점`, `${need}점 득점`);
             sim = { ...sim, runs: need, label: fix(sim.label), display: fix(sim.display), status: fix(sim.status) };
           }
@@ -550,6 +550,8 @@ function b() {
             }),
             l(),
             T());
+          // DEMO: 다음 투구 대신 결과·해설
+          if (e.mode === `DEMO`) return void S(() => ((e.demo.phase = `result`), T()), 1200);
           next(1500);
         };
       ((e.stealWindow = !1),
@@ -558,13 +560,13 @@ function b() {
           ? `파울 타구`
           : P.homeRun
             ? `큰 타구! 넘어가나…`
-            : `${{ ground: `땅볼`, line: `직선타`, fly: `뜬공`, pop: `뜬공` }[bb.kind]}! → 진루 / ← 귀루`),
+            : `${{ ground: `땅볼`, line: `직선타`, fly: `뜬공`, pop: `뜬공` }[bb.kind]}!${e.mode === `DEMO` ? `` : ` → 진루 / ← 귀루`}`),
         (e.distanceText = `-`),
         te(),
         ball && ((ball.style.display = `block`), (ball.style.width = ball.style.height = `8px`)),
         shadow && (shadow.style.display = `block`),
         draw(),
-        (e.play = bb.foul || P.homeRun ? null : P),
+        (e.play = bb.foul || P.homeRun || e.mode === `DEMO` ? null : P),
         (e.pendingOutcome = { processed: !1, resolve: finish }),
         (g.current = Date.now()),
         (m.current = setTimeout(() => {
@@ -911,6 +913,9 @@ function b() {
         (e.pitchSel = { type: null, zone: null, out: !1 }),
         (e.tbRunner = null),
         (e.difficulty = null),
+        (e.demo = null),
+        (e.demoSim = null),
+        (e.menuStep = null),
         (e.statusText = `난이도를 선택하고 플레이볼을 눌러주세요`),
         D(),
         ee(),
@@ -1143,8 +1148,56 @@ function b() {
   }, [pe, A, _e, ve, S, T, pickPitch]);
   // 경기 시작: { mode: TGA|1P|2P, diff: EASY|SOSO(TGA 전용)|HARD, innings }. 타순별 좌/우타는 여기서 확정되어 경기 내내 유지
   // 컴퓨터 대결은 컴퓨터가 선공(초), 플레이어가 후공(말). TGA는 9회말 n : n+차이에서 시작하는 역전 미션
+  // DEMO MODE: 상황 카드 시작. vi는 카드의 타자 유형(variant), 없으면 무작위
+  let startDemo = (0, _.useCallback)(
+    (ci, vi) => {
+      me();
+      let t = o.current,
+        card = BB_DEMO[ci];
+      vi ??= Math.floor(Math.random() * (card.variants ? card.variants.length : 1));
+      let c = bbDemoCase(card, vi);
+      ((t.mode = `DEMO`),
+        (t.difficulty = `EASY`),
+        (t.cpu = 0),
+        (t.half = `bottom`),
+        (t.bat = 1),
+        (t.teams = [`수비`, `우리 팀`].map((name) => ({ name, lineup: bbLineup(), batter: 1, runs: 0, line: [], h: 0, e: 0, b: 0 }))),
+        loadTeam(),
+        (t.outs = c.outs),
+        (t.baseStatus = [...c.bases]),
+        (t.demo = { ci, vi, c, phase: `ask`, pick: null }),
+        (t.demoSim = { demo: !0, fielders: c.fielders, batRun: c.batRun }),
+        (t.playballDisabled = !0),
+        (t.swingDisabled = !0),
+        (t.awaitPitch = !1),
+        (t.fieldView = `top-down-view`),
+        (t.statusText = `${c.title}: 전략을 골라 보세요`),
+        ie());
+      // 카드의 수비 위치로 옮겨 보여줌
+      for (let k in c.fielders || {}) {
+        let el = i.current[k],
+          q = bbPx(c.fielders[k]);
+        el && ((el.style.bottom = q.bottom + `px`), (el.style.left = q.left + `%`));
+      }
+      T();
+    },
+    [T],
+  );
+  let demoPick = (0, _.useCallback)(
+    (oi) => {
+      let t = o.current,
+        dm = t.demo;
+      if (!dm || dm.phase !== `ask`) return;
+      let op = dm.c.options[oi];
+      ((dm.phase = `play`), (dm.pick = oi), (t.demoSim = { ...t.demoSim, orders: op.orders }), (t.isPitched = !0), (t.statusText = `${op.label}!`), T());
+      pb({ ...op.bb });
+    },
+    [T],
+  );
+  let demoList = (0, _.useCallback)(() => (me(), (o.current.menuStep = `demo`), T()), [T]);
   let ye = (0, _.useCallback)(
     (cfg) => {
+      if (cfg.mode === `DEMO`) return startDemo(cfg.card);
       let t = o.current,
         tga = cfg.mode === `TGA`,
         team = (name, line = []) => ({ name, lineup: bbLineup(), batter: 1, runs: 0, line, h: 0, e: 0, b: 0 }),
@@ -1230,6 +1283,8 @@ function b() {
       awaitPitch: j.awaitPitch,
       pitchSel: { type: j.pitchSel.type, zone: !!j.pitchSel.zone },
       picks: j.picks || 0,
+      demo: j.demo,
+      menuStep: j.menuStep,
       runAlert: j.pickWarn ? { kind: `warn`, ...j.pickWarn } : j.rundown ? { kind: `rd`, ...j.rundown } : null,
       tbRunner: j.tbRunner,
       // 주루 지시 패널: 살아있는 주자별 가능 여부
@@ -1259,6 +1314,9 @@ function b() {
       pickPitch,
       pickBase,
       runnerGo,
+      startDemo,
+      demoPick,
+      demoList,
       runCmd: (id, cmd) => {
         let P = o.current.play;
         (P && (id === `all` ? P.commandAll(cmd) : P.command(id, cmd)), T());
@@ -1626,6 +1684,42 @@ function RunCtl({ ctl, onCmd }) {
       })
     : null;
 }
+// DEMO MODE 안내판: 상황·질문·선택지 → (플레이 재생) → 결과와 한 줄 해설
+function DemoPanel({ demo, onPick, onRetry, onNext, onList }) {
+  if (!demo || demo.phase === `play`) return null;
+  let c = demo.c,
+    occ = [1, 2, 3].filter((b) => c.bases[b - 1]),
+    sit = `${c.outs ? `${c.outs}사` : `무사`} ${occ.length ? `${occ.join('·')}루` : `주자 없음`} · 타자: ${c.batter}`,
+    op = demo.pick != null ? c.options[demo.pick] : null,
+    head = (0, S.jsx)(`h3`, { children: `공격 ${demo.ci + 1} · ${c.title}` });
+  return demo.phase === `ask`
+    ? (0, S.jsxs)(`div`, {
+        className: `bb-demo`,
+        children: [
+          head,
+          (0, S.jsx)(`div`, { className: `sit`, children: sit }),
+          (0, S.jsx)(`div`, { className: `ask`, children: c.ask }),
+          (0, S.jsx)(`div`, { className: `opts`, children: c.options.map((o, k) => (0, S.jsx)(`button`, { onClick: () => onPick(k), children: `${k + 1}. ${o.label}` }, k)) }),
+          (0, S.jsx)(`div`, { className: `note`, children: `※ 발야구라면 '치기'는 '차기'로, 우타·좌타는 오른발·왼발잡이로 생각하세요.` }),
+        ],
+      })
+    : (0, S.jsxs)(`div`, {
+        className: `bb-demo`,
+        children: [
+          head,
+          (0, S.jsx)(`div`, { className: `verdict ${op.good ? `good` : `bad`}`, children: op.good ? `👍 좋은 선택!` : `🤔 아쉬운 선택` }),
+          (0, S.jsx)(`div`, { className: `explain`, children: op.explain }),
+          (0, S.jsxs)(`div`, {
+            className: `row`,
+            children: [
+              (0, S.jsx)(`button`, { onClick: onRetry, children: `↺ 다시 해보기` }),
+              (0, S.jsx)(`button`, { onClick: onNext, children: `다음 상황 ▶` }),
+              (0, S.jsx)(`button`, { onClick: onList, children: `목록` }),
+            ],
+          }),
+        ],
+      });
+}
 // 견제 동작·런다운 때 주자 안내: ← 귀루 / → 스타트·진루
 function RunnerAlert({ alert, onGo }) {
   if (!alert) return null;
@@ -1684,6 +1778,7 @@ var HOWTO = [
   [`연장`, `동점이면 무사 2루 승부치기`],
   [`콜드`, `5회 15점 · 7회 10점 차 (5·9이닝)`],
   [`TGA`, `9회말 2·4·5점 차(EASY·SOSO·HARD) — 역전`],
+  [`DEMO`, `상황 카드로 공격 전략 배우기 (선택 → 플레이 → 해설)`],
 ];
 function HowTo() {
   return (0, S.jsx)(`div`, {
@@ -1913,12 +2008,12 @@ var TGA_INFO = {
     `점수가 뒤진 채 경기가 끝나면 미션 실패입니다.`,
   ],
   TGA_OUTRO = `경기를 뒤집어, 오늘 경기의 주인공이 되어볼까요?`;
-function oe({ visible: e, onSelect: t }) {
+function oe({ visible: e, onSelect: t, initStep }) {
   let [step, setStep] = (0, _.useState)(`mode`),
     [cfg, setCfg] = (0, _.useState)({});
   (0, _.useEffect)(() => {
-    e && (setStep(`mode`), setCfg({}));
-  }, [e]);
+    e && (setStep(initStep || `mode`), setCfg({}));
+  }, [e, initStep]);
   if (!e) return null;
   let btn = (label, onClick, cls = `bb-btn-playball`) => (0, S.jsx)(`button`, { className: `bb-btn ${cls}`, onClick, children: label }, label),
     pick = (k, v) => {
@@ -1928,16 +2023,27 @@ function oe({ visible: e, onSelect: t }) {
     back = (to) => btn(`◀`, () => setStep(to), `bb-btn-home`),
     body = {
       mode: [
+        btn(`⚾ REAL MODE · 실전 경기`, () => setStep(`real`), `bb-btn-swing`),
+        btn(`📘 DEMO MODE · 전략 배우기`, () => setStep(`demo`)),
+        btn(`❓ How To Play`, () => setStep(`help`), `bb-btn-home`),
+      ],
+      real: [
         btn(`🔥 Turn The Game Around`, () => pick(`mode`, `TGA`), `bb-btn-swing`),
         btn(`👤 Single Player`, () => pick(`mode`, `1P`)),
         btn(`👥 Double Player`, () => pick(`mode`, `2P`)),
-        btn(`❓ How To Play`, () => setStep(`help`), `bb-btn-home`),
+        back(`mode`),
+      ],
+      // 상황 카드 목록 (수비 전략은 다음에 추가)
+      demo: [
+        (0, S.jsx)(`div`, { className: `bb-demo-head`, children: `공격 전략: 상황을 보고 가장 좋은 작전을 골라 보세요` }, `h`),
+        ...BB_DEMO.map((c, i) => btn(`공격 ${i + 1} · ${c.title}`, () => t({ mode: `DEMO`, card: i }))),
+        back(`mode`),
       ],
       diff: [
         btn(`🟢 EASY`, () => pick(`diff`, `EASY`)),
         ...(cfg.mode === `TGA` ? [btn(`🟡 SOSO`, () => pick(`diff`, `SOSO`), `bb-btn-swing`)] : []),
         btn(`🔴 HARD`, () => pick(`diff`, `HARD`), `bb-btn-quit`),
-        back(`mode`),
+        back(`real`),
       ],
       innings: [
         (0, S.jsx)(`div`, { className: `bb-innings-pick`, children: [1, 3, 5, 9].map((n) => btn(`${n}이닝`, () => pick(`innings`, n))) }, `g`),
@@ -2160,6 +2266,13 @@ function ce() {
                 onAim: n.pickPitch,
               }),
               (0, S.jsx)(RunnerAlert, { alert: t.paused ? null : t.runAlert, onGo: n.runnerGo }),
+              (0, S.jsx)(DemoPanel, {
+                demo: t.paused ? null : t.demo,
+                onPick: n.demoPick,
+                onRetry: () => n.startDemo(t.demo.ci, t.demo.vi),
+                onNext: () => n.startDemo((t.demo.ci + 1) % BB_DEMO.length),
+                onList: n.demoList,
+              }),
               (0, S.jsx)(PitchPrompt, {
                 show: t.awaitPitch && !t.paused && !t.gameOver,
                 sel: t.pitchSel,
@@ -2250,6 +2363,7 @@ function ce() {
       (0, S.jsx)(oe, {
         visible: !t.difficulty && !t.gameOver,
         onSelect: n.setDifficulty,
+        initStep: t.menuStep,
       }),
     ],
   });
