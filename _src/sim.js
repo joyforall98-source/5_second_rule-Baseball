@@ -43,7 +43,8 @@ var BB_K = 4.4, // 필드 화면 1m = 4.4px (중앙 펜스 120m가 필드 위쪽
   bbFromPx = (p) => ({ x: ((p.left - 50) * 8.5) / BB_K, y: (p.bottom - 20) / BB_K }),
   // 펜스 거리: 파울폴 98m, 좌·우중간 약 114m, 중앙 120m
   bbFence = (phi) => 98 + 22 * Math.cos((Math.min(45, Math.abs(phi)) * Math.PI) / 90),
-  BB_WALL_H = 3.6; // 펜스 높이(m). 이 높이 이상으로 넘어가야 홈런
+  BB_WALL_H = 3.6, // 펜스 높이(m). 이 높이 이상으로 넘어가야 홈런
+  BB_RELAY_MARGIN = 0.35; // 외야 → 홈·3루 직접 송구에 필요한 여유(초). 이보다 빠듯하면 내야로 중계
 
 var BB_SIM = (() => {
   let R = Math.random,
@@ -435,8 +436,11 @@ var BB_SIM = (() => {
           if (k == null || P.holderBase === k || k < 1) continue;
           let d = dist(h, BB_BASES[k]),
             tt = Math.min(d < 7 ? d / c.ifSpd + 0.1 : 99, thrT(h, k)),
-            rt = runnerTime(r, k);
-          if (tt + 0.05 < rt) {
+            rt = runnerTime(r, k),
+            // 외야에서 홈·3루로 길게 던질 때는 보살 가능성이 높을 때만. 아니면 아래에서 내야로 중계해
+            // 타자·뒤 주자의 추가 진루를 막음
+            need = d > 45 && k >= 3 ? BB_RELAY_MARGIN : 0.05;
+          if (tt + need < rt) {
             // 2아웃이면 가장 확실한 아웃, 아니면 앞선 주자(실점 방지) 우선
             let twoOut = P.st.outs + P.outs.length === 2,
               score = (twoOut ? 0 : k * 10) + (isForce(r, k) ? 5 : 0) + (rt - tt) * (twoOut ? 10 : 1);
@@ -447,8 +451,10 @@ var BB_SIM = (() => {
         // 잡을 수 없으면: 달리는 주자가 더 못 가도록 맨 뒤 주자의 다음 베이스로
         let moving = P.r.filter((r) => live(r) && r.state === `run` && r.target > r.s);
         if (moving.length) {
-          let kc = Math.min(4, Math.min(...moving.map((r) => r.target)) + 1);
-          if (kc !== P.holderBase) return (throwTo(kc), !0);
+          // 외야수는 내야(2루 쪽 중계)로, 내야수는 뒤 주자가 가는 베이스로 던져 더 못 가게 묶음.
+          // 이미 늦은 홈 송구는 하지 않음 (그 틈에 타자가 한 베이스 더 가므로)
+          let kc = P.holder.startsWith(`out`) ? 2 : Math.min(...moving.map((r) => r.target));
+          if (kc < 4 && kc !== P.holderBase) return (throwTo(kc), !0);
           return !1;
         }
         return !1;

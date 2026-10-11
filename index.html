@@ -59,7 +59,8 @@ var BB_K = 4.4, // 필드 화면 1m = 4.4px (중앙 펜스 120m가 필드 위쪽
   bbFromPx = (p) => ({ x: ((p.left - 50) * 8.5) / BB_K, y: (p.bottom - 20) / BB_K }),
   // 펜스 거리: 파울폴 98m, 좌·우중간 약 114m, 중앙 120m
   bbFence = (phi) => 98 + 22 * Math.cos((Math.min(45, Math.abs(phi)) * Math.PI) / 90),
-  BB_WALL_H = 3.6; // 펜스 높이(m). 이 높이 이상으로 넘어가야 홈런
+  BB_WALL_H = 3.6, // 펜스 높이(m). 이 높이 이상으로 넘어가야 홈런
+  BB_RELAY_MARGIN = 0.35; // 외야 → 홈·3루 직접 송구에 필요한 여유(초). 이보다 빠듯하면 내야로 중계
 
 var BB_SIM = (() => {
   let R = Math.random,
@@ -451,8 +452,11 @@ var BB_SIM = (() => {
           if (k == null || P.holderBase === k || k < 1) continue;
           let d = dist(h, BB_BASES[k]),
             tt = Math.min(d < 7 ? d / c.ifSpd + 0.1 : 99, thrT(h, k)),
-            rt = runnerTime(r, k);
-          if (tt + 0.05 < rt) {
+            rt = runnerTime(r, k),
+            // 외야에서 홈·3루로 길게 던질 때는 보살 가능성이 높을 때만. 아니면 아래에서 내야로 중계해
+            // 타자·뒤 주자의 추가 진루를 막음
+            need = d > 45 && k >= 3 ? BB_RELAY_MARGIN : 0.05;
+          if (tt + need < rt) {
             // 2아웃이면 가장 확실한 아웃, 아니면 앞선 주자(실점 방지) 우선
             let twoOut = P.st.outs + P.outs.length === 2,
               score = (twoOut ? 0 : k * 10) + (isForce(r, k) ? 5 : 0) + (rt - tt) * (twoOut ? 10 : 1);
@@ -463,8 +467,10 @@ var BB_SIM = (() => {
         // 잡을 수 없으면: 달리는 주자가 더 못 가도록 맨 뒤 주자의 다음 베이스로
         let moving = P.r.filter((r) => live(r) && r.state === `run` && r.target > r.s);
         if (moving.length) {
-          let kc = Math.min(4, Math.min(...moving.map((r) => r.target)) + 1);
-          if (kc !== P.holderBase) return (throwTo(kc), !0);
+          // 외야수는 내야(2루 쪽 중계)로, 내야수는 뒤 주자가 가는 베이스로 던져 더 못 가게 묶음.
+          // 이미 늦은 홈 송구는 하지 않음 (그 틈에 타자가 한 베이스 더 가므로)
+          let kc = P.holder.startsWith(`out`) ? 2 : Math.min(...moving.map((r) => r.target));
+          if (kc < 4 && kc !== P.holderBase) return (throwTo(kc), !0);
           return !1;
         }
         return !1;
@@ -1639,6 +1645,7 @@ function b() {
         last = performance.now(),
         lastHud = 0,
         hrShown = !1,
+        errShown = !1,
         place = (el, x, yy) => {
           if (!el) return;
           let q = bbPx({ x, y: yy });
@@ -1656,6 +1663,12 @@ function b() {
               !P.possessed &&
               (e.distanceText = `${Math.round(Math.min(P.distance, Math.hypot(b.x, b.y)))} m`));
           for (let key in vw.fielders) place(i.current[key], vw.fielders[key].x, vw.fielders[key].y);
+          // 공을 놓치거나 더듬은 순간, 그 수비수 머리 위에 느낌표 (뜬공은 떨어뜨린 순간, 땅볼은 잡으려던 순간)
+          if (!errShown && P.ev?.error && P.t >= Math.min(P.ev.t, P.landT)) {
+            errShown = !0;
+            let errEl = i.current[P.ev.key];
+            errEl && (errEl.classList.add(`err`), setTimeout(() => errEl.classList.remove(`err`), 1800));
+          }
           // 홈런: 담장을 넘는 순간 알리고, 주자들이 홈에 들어오는 장면은 계속 보여줌
           P.homeRun && !hrShown && P.t >= bb.T && ((hrShown = !0), E(`HOME RUN!`, `#f1c40f`), (e.statusText = `홈런! 주자들이 홈으로`));
           for (let rr of vw.runners) {
@@ -1686,9 +1699,6 @@ function b() {
           // 점수판 H·E: 안타(홈런 포함, 실책·야수선택 출루 제외)는 공격 팀, 실책은 수비 팀
           (sim.homeRun || (sim.batterBase >= 1 && !sim.caught && !sim.error && !/야수선택/.test(sim.label))) && e.teams[e.bat].h++;
           sim.error && e.teams[1 - e.bat].e++;
-          // 실책: 실책한 수비수 머리 위에 잠깐 느낌표
-          let errEl = sim.error && i.current[sim.errorBy];
-          errEl && (errEl.classList.add(`err`), setTimeout(() => errEl.classList.remove(`err`), 1800));
           ((e.outs += sim.outsAdded),
             (e.totalScore += sim.runs),
             (e.baseStatus = e.outs >= 3 ? [!1, !1, !1] : sim.newBases),
@@ -2676,7 +2686,7 @@ function te({ text: e, color: t, visible: n }) {
 function ne({ visible: e, onRestart: n, mode, endInfo, teams, innings, inning, half }) {
   if (!e || !endInfo) return null;
   let w = endInfo.winner,
-    title = mode === `2P` ? (w == null ? `무승부` : `${teams[w].name} 승리!`) : w === 1 ? (mode === `TGA` ? `역전 성공!` : `승리!`) : mode === `TGA` ? `미션 실패` : `패배`;
+    title = mode === `2P` ? (w == null ? `무승부` : `${teams[w].name} 승리!`) : w === 1 ? (mode === `TGA` ? `미션 성공!` : `승리!`) : mode === `TGA` ? `미션 실패` : `패배`;
   return (0, S.jsxs)(`div`, {
     className: `bb-game-over`,
     children: [
@@ -3048,6 +3058,28 @@ function ae({
     }),
   });
 }
+// TGA 난이도 설명 (경기 시작 전 화면). 규칙 두 줄과 맺음말은 모든 난이도 공통
+var TGA_INFO = {
+  EASY: [
+    `9회말, 2점 뒤진 채로 시작합니다.`,
+    `볼 비율이 높아 볼넷을 얻기 쉽습니다.`,
+    `공이 들어올 위치와 타격 타이밍을 나타내는 원이 보입니다. 원이 초록일 때 치면 안타가 잘 나옵니다.`,
+  ],
+  SOSO: [
+    `9회말, 4점 뒤진 채로 시작합니다.`,
+    `타구가 잘 뻗는 편이며 공이 들어올 위치가 보입니다. 타이밍 원은 없습니다.`,
+  ],
+  HARD: [
+    `9회말, 5점 뒤진 채로 시작합니다.`,
+    `공이 빠르고 여러 변화구가 섞여 있어 타격 타이밍을 잡기 더 어렵습니다.`,
+    `수비 송구가 빨라 도루가 어렵습니다.`,
+  ],
+},
+  TGA_RULES = [
+    `3아웃 전에 역전하면 성공하며, 동점이 되면 연장(승부치기 규정 적용)으로 갑니다.`,
+    `점수가 뒤진 채 경기가 끝나면 미션 실패입니다.`,
+  ],
+  TGA_OUTRO = `경기를 뒤집어, 오늘 경기의 주인공이 되어볼까요?`;
 function oe({ visible: e, onSelect: t }) {
   let [step, setStep] = (0, _.useState)(`mode`),
     [cfg, setCfg] = (0, _.useState)({});
@@ -3058,7 +3090,7 @@ function oe({ visible: e, onSelect: t }) {
   let btn = (label, onClick, cls = `bb-btn-playball`) => (0, S.jsx)(`button`, { className: `bb-btn ${cls}`, onClick, children: label }, label),
     pick = (k, v) => {
       let c2 = { ...cfg, [k]: v };
-      (setCfg(c2), k === `mode` ? setStep(`diff`) : k === `diff` && c2.mode !== `TGA` ? setStep(`innings`) : t(c2));
+      (setCfg(c2), k === `mode` ? setStep(`diff`) : k === `diff` ? setStep(c2.mode === `TGA` ? `tga` : `innings`) : t(c2));
     },
     back = (to) => btn(`◀`, () => setStep(to), `bb-btn-home`),
     body = {
@@ -3079,6 +3111,22 @@ function oe({ visible: e, onSelect: t }) {
         back(`diff`),
       ],
       help: [(0, S.jsx)(HowTo, {}, `h`), back(`mode`)],
+      tga: [
+        (0, S.jsxs)(
+          `div`,
+          {
+            className: `bb-tga-intro`,
+            children: [
+              (0, S.jsx)(`div`, { className: `bb-tga-intro-title`, children: `🔥 Turn The Game Around · ${cfg.diff}` }),
+              (0, S.jsx)(`ul`, { children: [...(TGA_INFO[cfg.diff] || []), ...TGA_RULES].map((li) => (0, S.jsx)(`li`, { children: li }, li)) }),
+              (0, S.jsx)(`p`, { className: `bb-tga-intro-outro`, children: TGA_OUTRO }),
+            ],
+          },
+          `i`,
+        ),
+        btn(`▶ 경기 시작`, () => t(cfg)),
+        back(`diff`),
+      ],
     }[step];
   return (0, S.jsx)(`div`, {
     className: `bb-pause-overlay`,
@@ -3418,6 +3466,11 @@ function ce() {
 .bv-marker.bad{border-color:#95a5a6;box-shadow:none}
 .bv-marker.hint.bad::after{border-color:#95a5a6;box-shadow:none}
 .bb-pitchprompt-types.pick button{background:#7f3b2d}
+.bb-tga-intro{text-align:left;margin:2px 0 6px;color:#ddd;font-size:13.5px;line-height:1.6}
+.bb-tga-intro-title{font-weight:900;color:#f39c12;margin-bottom:4px}
+.bb-tga-intro ul{margin:0;padding-left:18px}
+.bb-tga-intro li+li{margin-top:3px}
+.bb-tga-intro-outro{margin:8px 0 0;text-align:center;font-weight:800;color:#f1c40f}
 .bb-runalert{border-color:#e67e22;animation:bbWarn .5s ease-in-out infinite alternate}
 .bb-runalert .bb-pitchprompt-title{color:#f39c12}
 @keyframes bbWarn{to{box-shadow:0 0 18px #e67e22}}

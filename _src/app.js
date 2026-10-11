@@ -478,6 +478,7 @@ function b() {
         last = performance.now(),
         lastHud = 0,
         hrShown = !1,
+        errShown = !1,
         place = (el, x, yy) => {
           if (!el) return;
           let q = bbPx({ x, y: yy });
@@ -495,6 +496,12 @@ function b() {
               !P.possessed &&
               (e.distanceText = `${Math.round(Math.min(P.distance, Math.hypot(b.x, b.y)))} m`));
           for (let key in vw.fielders) place(i.current[key], vw.fielders[key].x, vw.fielders[key].y);
+          // 공을 놓치거나 더듬은 순간, 그 수비수 머리 위에 느낌표 (뜬공은 떨어뜨린 순간, 땅볼은 잡으려던 순간)
+          if (!errShown && P.ev?.error && P.t >= Math.min(P.ev.t, P.landT)) {
+            errShown = !0;
+            let errEl = i.current[P.ev.key];
+            errEl && (errEl.classList.add(`err`), setTimeout(() => errEl.classList.remove(`err`), 1800));
+          }
           // 홈런: 담장을 넘는 순간 알리고, 주자들이 홈에 들어오는 장면은 계속 보여줌
           P.homeRun && !hrShown && P.t >= bb.T && ((hrShown = !0), E(`HOME RUN!`, `#f1c40f`), (e.statusText = `홈런! 주자들이 홈으로`));
           for (let rr of vw.runners) {
@@ -525,9 +532,6 @@ function b() {
           // 점수판 H·E: 안타(홈런 포함, 실책·야수선택 출루 제외)는 공격 팀, 실책은 수비 팀
           (sim.homeRun || (sim.batterBase >= 1 && !sim.caught && !sim.error && !/야수선택/.test(sim.label))) && e.teams[e.bat].h++;
           sim.error && e.teams[1 - e.bat].e++;
-          // 실책: 실책한 수비수 머리 위에 잠깐 느낌표
-          let errEl = sim.error && i.current[sim.errorBy];
-          errEl && (errEl.classList.add(`err`), setTimeout(() => errEl.classList.remove(`err`), 1800));
           ((e.outs += sim.outsAdded),
             (e.totalScore += sim.runs),
             (e.baseStatus = e.outs >= 3 ? [!1, !1, !1] : sim.newBases),
@@ -1515,7 +1519,7 @@ function te({ text: e, color: t, visible: n }) {
 function ne({ visible: e, onRestart: n, mode, endInfo, teams, innings, inning, half }) {
   if (!e || !endInfo) return null;
   let w = endInfo.winner,
-    title = mode === `2P` ? (w == null ? `무승부` : `${teams[w].name} 승리!`) : w === 1 ? (mode === `TGA` ? `역전 성공!` : `승리!`) : mode === `TGA` ? `미션 실패` : `패배`;
+    title = mode === `2P` ? (w == null ? `무승부` : `${teams[w].name} 승리!`) : w === 1 ? (mode === `TGA` ? `미션 성공!` : `승리!`) : mode === `TGA` ? `미션 실패` : `패배`;
   return (0, S.jsxs)(`div`, {
     className: `bb-game-over`,
     children: [
@@ -1887,6 +1891,28 @@ function ae({
     }),
   });
 }
+// TGA 난이도 설명 (경기 시작 전 화면). 규칙 두 줄과 맺음말은 모든 난이도 공통
+var TGA_INFO = {
+  EASY: [
+    `9회말, 2점 뒤진 채로 시작합니다.`,
+    `볼 비율이 높아 볼넷을 얻기 쉽습니다.`,
+    `공이 들어올 위치와 타격 타이밍을 나타내는 원이 보입니다. 원이 초록일 때 치면 안타가 잘 나옵니다.`,
+  ],
+  SOSO: [
+    `9회말, 4점 뒤진 채로 시작합니다.`,
+    `타구가 잘 뻗는 편이며 공이 들어올 위치가 보입니다. 타이밍 원은 없습니다.`,
+  ],
+  HARD: [
+    `9회말, 5점 뒤진 채로 시작합니다.`,
+    `공이 빠르고 여러 변화구가 섞여 있어 타격 타이밍을 잡기 더 어렵습니다.`,
+    `수비 송구가 빨라 도루가 어렵습니다.`,
+  ],
+},
+  TGA_RULES = [
+    `3아웃 전에 역전하면 성공하며, 동점이 되면 연장(승부치기 규정 적용)으로 갑니다.`,
+    `점수가 뒤진 채 경기가 끝나면 미션 실패입니다.`,
+  ],
+  TGA_OUTRO = `경기를 뒤집어, 오늘 경기의 주인공이 되어볼까요?`;
 function oe({ visible: e, onSelect: t }) {
   let [step, setStep] = (0, _.useState)(`mode`),
     [cfg, setCfg] = (0, _.useState)({});
@@ -1897,7 +1923,7 @@ function oe({ visible: e, onSelect: t }) {
   let btn = (label, onClick, cls = `bb-btn-playball`) => (0, S.jsx)(`button`, { className: `bb-btn ${cls}`, onClick, children: label }, label),
     pick = (k, v) => {
       let c2 = { ...cfg, [k]: v };
-      (setCfg(c2), k === `mode` ? setStep(`diff`) : k === `diff` && c2.mode !== `TGA` ? setStep(`innings`) : t(c2));
+      (setCfg(c2), k === `mode` ? setStep(`diff`) : k === `diff` ? setStep(c2.mode === `TGA` ? `tga` : `innings`) : t(c2));
     },
     back = (to) => btn(`◀`, () => setStep(to), `bb-btn-home`),
     body = {
@@ -1918,6 +1944,22 @@ function oe({ visible: e, onSelect: t }) {
         back(`diff`),
       ],
       help: [(0, S.jsx)(HowTo, {}, `h`), back(`mode`)],
+      tga: [
+        (0, S.jsxs)(
+          `div`,
+          {
+            className: `bb-tga-intro`,
+            children: [
+              (0, S.jsx)(`div`, { className: `bb-tga-intro-title`, children: `🔥 Turn The Game Around · ${cfg.diff}` }),
+              (0, S.jsx)(`ul`, { children: [...(TGA_INFO[cfg.diff] || []), ...TGA_RULES].map((li) => (0, S.jsx)(`li`, { children: li }, li)) }),
+              (0, S.jsx)(`p`, { className: `bb-tga-intro-outro`, children: TGA_OUTRO }),
+            ],
+          },
+          `i`,
+        ),
+        btn(`▶ 경기 시작`, () => t(cfg)),
+        back(`diff`),
+      ],
     }[step];
   return (0, S.jsx)(`div`, {
     className: `bb-pause-overlay`,

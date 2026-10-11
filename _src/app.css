@@ -36,6 +36,11 @@
 .bv-marker.bad{border-color:#95a5a6;box-shadow:none}
 .bv-marker.hint.bad::after{border-color:#95a5a6;box-shadow:none}
 .bb-pitchprompt-types.pick button{background:#7f3b2d}
+.bb-tga-intro{text-align:left;margin:2px 0 6px;color:#ddd;font-size:13.5px;line-height:1.6}
+.bb-tga-intro-title{font-weight:900;color:#f39c12;margin-bottom:4px}
+.bb-tga-intro ul{margin:0;padding-left:18px}
+.bb-tga-intro li+li{margin-top:3px}
+.bb-tga-intro-outro{margin:8px 0 0;text-align:center;font-weight:800;color:#f1c40f}
 .bb-runalert{border-color:#e67e22;animation:bbWarn .5s ease-in-out infinite alternate}
 .bb-runalert .bb-pitchprompt-title{color:#f39c12}
 @keyframes bbWarn{to{box-shadow:0 0 18px #e67e22}}
