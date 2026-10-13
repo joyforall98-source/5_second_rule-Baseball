@@ -117,7 +117,8 @@ var BB_SIM = (() => {
   // DEMO 상황용(없으면 기존과 같음): fielders 수비 위치 덮어쓰기, demo 실책·무작위 없음,
   // batRun 타자 주력(m/s), orders [{ t, id, base }] 정해진 시각에 주자 지시,
   // miss 뜬공·직선타를 수비수가 뒤로 빠뜨림(backup이면 다른 수비수가 받아 줌, 아니면 놓친 수비수가 쫓아감),
-  // firstThrow { base, carry } 공을 잡은 수비수의 첫 송구(carry면 공을 들고 그 베이스까지 뜀)
+  // firstThrow { base, carry } 공을 잡은 수비수의 첫 송구(carry면 공을 들고 그 베이스까지 뜀),
+  // noChase 파울 뜬공을 아무도 쫓지 않음
   function start(bb, st) {
     let FM = st.fielders ? { ...BB_FIELD_M, ...st.fielders } : BB_FIELD_M,
       c = cfg(st.diff),
@@ -233,7 +234,7 @@ var BB_SIM = (() => {
         H = (9.8 * bb.T ** 2) / 8,
         lateral = bb.D * Math.sin(((Math.abs(bb.phi) - 45) * Math.PI) / 180),
         best = null;
-      if (lateral < 16 && bb.D < 75)
+      if (lateral < 16 && bb.D < 75 && !st.noChase)
         for (let k of [`catcher`, `inf-1b`, `inf-3b`, `pitcher`, `out-lf`, `out-rf`]) {
           let n = need(k, L, 1.5);
           n <= bb.T + 0.1 && (!best || n < best.n) && (best = { k, n });
@@ -490,6 +491,14 @@ var BB_SIM = (() => {
           P.caught = { key: ev.key, p: ev.p, t: P.t };
           out(bat, 0, !0, ev.key); // 뜬공 아웃 (이때 들어온 득점은 인정 안 됨 → force 취급)
           if (P.done) return;
+          // 잡히기 전에 홈을 밟은 주자는 원래 베이스를 다시 밟지 않았으므로 득점 취소, 아웃
+          for (let r of P.r)
+            if (r !== bat && r.state === `scored`) {
+              ((P.runs = P.runs.filter((x) => x.id !== r.id)), (r.state = `out`), (r.outT = P.t));
+              P.outs.push({ id: r.id, base: r.from, t: P.t, force: !0, by: ev.key, early: !0 });
+            }
+          P.st.outs + P.outs.length >= 3 && finish();
+          if (P.done) return;
           for (let r of P.r) {
             if (!live(r)) continue;
             // 잡혔으면 원래 베이스로 돌아가 다시 밟아야 함 (태그업)
@@ -606,6 +615,11 @@ var BB_SIM = (() => {
             arriveBase(r);
             if (P.done) return;
           } else r.s = ns;
+        }
+        // 앞 주자 추월: 뒤 주자가 앞 주자를 앞지르면 뒤 주자 아웃
+        for (let r of P.r) {
+          let l = leadOf(r);
+          if (l && live(r) && r.s > l.s + 0.03 && (out(r, Math.min(4, Math.max(1, Math.round(l.s))), !1, `pass`), P.done)) return;
         }
         // 고정 종료(파울), 홈런은 모든 주자가 홈에 들어오면
         if (P.fixedEnd != null) {
@@ -728,7 +742,7 @@ var BB_SIM = (() => {
     if (P.caught) {
       let sac = runs > 0 && total < 3;
       ((why = `${pos} ${sac ? `희생플라이` : KIND_OUT[bb.kind]}`), (label = why));
-      otherOuts.length && ((why += ` · 더블플레이`), (label = why));
+      otherOuts.length && ((why += otherOuts.some((o) => o.early) ? ` · 주자가 일찍 출발해 아웃` : ` · 더블플레이`), (label = why));
     } else if (batOut) {
       if (bat.touched === 0)
         ((why = bb.kind === `ground` ? `${pos} ${outs.length >= 2 ? `병살타` : `땅볼`}` : `${pos} → 1루 송구 아웃`), (label = why));
@@ -741,7 +755,7 @@ var BB_SIM = (() => {
         fc = otherOuts.length > 0 && (P.error || (bb.kind === `ground` && otherOuts.some((o) => o.force)));
       ((res.error = ec), ec && (res.errorBy = ev.errBy || ev.key));
       label = ec ? `${BB_POS[ev.errBy || ev.key]} 실책 출루` : fc ? `${pos} ${KIND_OUT[bb.kind]}, 야수선택` : bb.kind === `ground` && ev.infield && b === 1 ? `내야안타` : HIT[b] || `안타`;
-      otherOuts.length && ((why = otherOuts[0].force ? `${baseName(otherOuts[0].base)} 포스아웃` : throwWhy(otherOuts[0])), (label += ` (주자 ${baseName(otherOuts[0].base)}에서 아웃)`));
+      otherOuts.length && ((why = otherOuts[0].by === `pass` ? `앞 주자 추월 아웃` : otherOuts[0].force ? `${baseName(otherOuts[0].base)} 포스아웃` : throwWhy(otherOuts[0])), (label += otherOuts[0].by === `pass` ? ` (주자가 앞 주자를 앞질러 아웃)` : ` (주자 ${baseName(otherOuts[0].base)}에서 아웃)`));
       res.batterBase = b;
     }
     runs && !P.caught && (label = `${runs}타점 ` + label);

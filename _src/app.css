@@ -42,9 +42,10 @@
 .bb-tga-intro li+li{margin-top:3px}
 .bb-demo-list{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .bb-demo-list>div{display:flex;flex-direction:column;gap:6px}
-.bb-demo-list .wide{grid-column:1/-1}
+.bb-demo-list .wide{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.bb-demo-list .wide b{grid-column:1/-1}
 .bb-demo-list b{font-size:13px;color:#f1c40f;text-align:left}
-.bb-demo-list .bb-btn{font-size:12.5px;padding:8px 10px;text-align:left}
+.bb-demo-list .bb-btn{font-size:13.5px;padding:7px 10px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media (max-width:640px){.bb-demo-list{grid-template-columns:1fr}}
 .bb-demo-head{font-size:13px;color:#bbb;margin:2px 0 4px;text-align:left}
 /* DEMO 안내판: 경기장 아래(조작 버튼 자리)에 넓게, 큰 글씨 */

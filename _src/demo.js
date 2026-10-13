@@ -9,7 +9,7 @@ var BB_DEMO = [
   // ── 기초 규칙 (side: basic). rule은 질문 위에 보이는 규칙 설명 ──
   {
     side: `basic`,
-    title: `뜬공이 잡히면 주자는 돌아가요`,
+    title: `뜬공 잡히면 귀루`,
     bases: [!0, !1, !1],
     outs: 0,
     batter: `우타 · 보통 주력`,
@@ -34,7 +34,177 @@ var BB_DEMO = [
     ],
   },
   {
-    title: `빈 곳으로 보내기`,
+    side: `basic`,
+    title: `땅볼엔 꼭 뛰기`,
+    bases: [!0, !1, !1],
+    outs: 0,
+    batter: `우타 · 보통 주력`,
+    rule: `📏 규칙: 타자가 치면 1루로 뛰어요. 1루 주자는 자리를 비켜 줘야 하므로 땅볼이면 꼭 2루로 뛰어야 해요. 이때 수비는 공을 들고 2루를 밟기만 해도 아웃시킬 수 있어요(포스 아웃).`,
+    ask: `타자가 3루 쪽으로 느린 땅볼을 쳤어요! 1루 주자는?`,
+    options: [
+      {
+        label: `치자마자 2루로 달리기`,
+        good: !0,
+        bb: { kind: `ground`, phi: -20, v0: 16 },
+        orders: [{ t: 0.05, id: `runner-1`, base: 2 }],
+        expect: { outs: 1, bases: [!1, !0, !1] },
+        explain: `빨리 출발해 2루에서 살았어요! 수비는 타자만 1루에서 잡았어요. 땅볼이면 1루 주자는 망설이지 말고 뛰어요.`,
+      },
+      {
+        label: `잡히는지 보고 천천히 출발하기`,
+        good: !1,
+        bb: { kind: `ground`, phi: -20, v0: 16 },
+        orders: [
+          { t: 0.05, id: `runner-1`, base: 1 },
+          { t: 1.6, id: `runner-1`, base: 2 },
+        ],
+        expect: { outs: 1, bases: [!0, !1, !1] },
+        explain: `늦게 출발해 2루에서 포스 아웃! 땅볼일 때 1루 주자는 꼭 바로 뛰어야 해요.`,
+      },
+    ],
+  },
+  {
+    side: `basic`,
+    title: `2아웃엔 바로 뛰기`,
+    bases: [!1, !0, !1],
+    outs: 2,
+    batter: `우타 · 보통 주력`,
+    rule: `📏 규칙: 3아웃이 되면 공수 교대예요. 2아웃이면 공이 잡혀도 어차피 공격이 끝나니, 주자는 치자마자 뛰어요.`,
+    ask: `타자가 공을 쳤어요! 2루 주자는?`,
+    options: [
+      {
+        label: `치자마자 홈까지 달리기`,
+        good: !0,
+        bb: { kind: `line`, phi: 5, D: 62, T: 1.63 },
+        orders: [{ t: 0.05, id: `runner-2`, base: 4 }],
+        expect: { runs: 1 },
+        explain: `바로 출발해 홈까지 들어왔어요! 2아웃에서는 기다릴 필요가 없어요.`,
+      },
+      {
+        label: `공이 떨어지는지 보고 출발하기`,
+        good: !1,
+        bb: { kind: `line`, phi: 5, D: 62, T: 1.63 },
+        orders: [
+          { t: 0.05, id: `runner-2`, base: 2 },
+          { t: 1.9, id: `runner-2`, base: 3 },
+        ],
+        expect: { runs: 0, bases: [!0, !1, !0] },
+        explain: `기다리다 늦게 출발해 3루에서 멈췄어요. 2아웃이면 바로 뛰어야 점수를 낼 수 있어요.`,
+      },
+    ],
+  },
+  {
+    side: `basic`,
+    title: `1루는 달려 통과`,
+    bases: [!1, !1, !1],
+    outs: 0,
+    batter: `우타 · 보통 주력`,
+    rule: `📏 규칙: 1루는 밟고 지나쳐 달려도 아웃이 아니에요. (2루·3루는 지나치면 태그 아웃될 수 있어요.)`,
+    ask: `유격수 쪽으로 깊은 땅볼을 쳤어요! 1루까지 어떻게 달릴까요?`,
+    options: [
+      {
+        label: `1루를 지나치듯 끝까지 전력 질주`,
+        good: !0,
+        batRun: 7.6,
+        bb: { kind: `ground`, phi: -17, v0: 20 },
+        expect: { outs: 0, bases: [!0, !1, !1] },
+        explain: `속도를 줄이지 않고 달려 1루에서 살았어요(내야안타)! 1루는 지나쳐 달려도 돼요.`,
+      },
+      {
+        label: `1루에 멈추려고 앞에서 속도 줄이기`,
+        good: !1,
+        batRun: 6.6,
+        bb: { kind: `ground`, phi: -17, v0: 20 },
+        expect: { outs: 1 },
+        explain: `멈추려고 속도를 줄인 사이 공이 먼저 1루에 왔어요. 1루는 끝까지 달려 지나가요.`,
+      },
+    ],
+  },
+  {
+    side: `basic`,
+    title: `태그업`,
+    bases: [!1, !1, !0],
+    outs: 1,
+    batter: `우타 · 보통 주력`,
+    rule: `📏 규칙: 뜬공이 잡힌 뒤에도 주자는 원래 베이스를 다시 밟고 출발하면 다음 루로 갈 수 있어요(태그업). 잡히기 전에 출발하면 다시 돌아와 밟아야 해요.`,
+    ask: `외야로 높은 뜬공! 3루 주자는?`,
+    options: [
+      {
+        label: `3루를 밟고 있다가, 잡히는 순간 출발`,
+        good: !0,
+        bb: { kind: `fly`, phi: 8, D: 84, T: 4 },
+        expect: { runs: 1, outs: 1 },
+        explain: `잡힌 순간 출발해 홈인! 태그업으로 1점을 냈어요.`,
+      },
+      {
+        label: `치자마자 홈으로 달리기`,
+        good: !1,
+        bb: { kind: `fly`, phi: 8, D: 84, T: 4 },
+        orders: [{ t: 0.2, id: `runner-3`, base: 4 }],
+        expect: { runs: 0, outs: 2 },
+        explain: `잡히기 전에 출발해 3루를 다시 밟지 않았으니 득점 취소, 주자도 아웃이에요.`,
+      },
+    ],
+  },
+  {
+    side: `basic`,
+    defense: !0,
+    title: `파울 뜬공도 아웃`,
+    bases: [!1, !1, !1],
+    outs: 0,
+    batter: `우타 · 보통 주력`,
+    rule: `📏 규칙: 파울 지역에 뜬 공이라도 땅에 닿기 전에 잡으면 타자는 아웃이에요.`,
+    ask: `1루 쪽 파울 지역으로 뜬공이 날아가요! 1루수는?`,
+    options: [
+      {
+        label: `끝까지 쫓아가 잡기`,
+        good: !0,
+        bb: { kind: `fly`, foul: !0, phi: 52, D: 30, T: 3.2 },
+        expect: { outs: 1 },
+        explain: `파울 뜬공을 잡아 타자 아웃! 파울이라도 끝까지 쫓아가요.`,
+      },
+      {
+        label: `파울이니까 그냥 두기`,
+        good: !1,
+        sim: { noChase: !0 },
+        bb: { kind: `fly`, foul: !0, phi: 52, D: 30, T: 3.2 },
+        expect: { outs: 0 },
+        explain: `잡을 수 있었는데 포기해서 타자에게 다시 칠 기회를 줬어요.`,
+      },
+    ],
+  },
+  {
+    side: `basic`,
+    title: `앞 주자 추월 금지`,
+    bases: [!0, !1, !0],
+    outs: 1,
+    batter: `우타 · 보통 주력`,
+    rule: `📏 규칙: 뒤에 있는 주자가 앞 주자를 앞질러 가면 앞지른 주자가 아웃이에요. 달릴 때는 앞 주자를 보며 달려요.`,
+    ask: `안타! 그런데 3루 주자가 홈으로 갈지 망설이며 3루에 멈췄어요. 1루 주자는?`,
+    options: [
+      {
+        label: `앞 주자를 보며 2루까지만 가기`,
+        good: !0,
+        bb: { kind: `line`, phi: -15, D: 58, T: 1.54 },
+        orders: [{ t: 1.64, id: `runner-3`, base: 3 }],
+        expect: { outs: 0, bases: [!0, !0, !0] },
+        explain: `앞 주자를 보고 2루에서 멈춰 1사 만루로 기회를 이어 갔어요!`,
+      },
+      {
+        label: `앞만 보고 홈까지 달리기`,
+        good: !1,
+        bb: { kind: `line`, phi: -15, D: 58, T: 1.54 },
+        orders: [
+          { t: 0.15, id: `runner-1`, base: 4 },
+          { t: 1.64, id: `runner-3`, base: 3 },
+        ],
+        expect: { outs: 1, runs: 0 },
+        explain: `3루에 멈춘 앞 주자를 앞질러 아웃! 달릴 때는 앞 주자가 어디 있는지 꼭 봐요.`,
+      },
+    ],
+  },
+  {
+    title: `빈 곳으로`,
     bases: [!1, !1, !1],
     outs: 0,
     batter: `우타 · 보통 주력`,
@@ -74,7 +244,7 @@ var BB_DEMO = [
     ],
   },
   {
-    title: `안전하게 진루하기`,
+    title: `안전한 진루`,
     bases: [!1, !0, !1],
     outs: 1,
     batter: `우타 · 보통 주력`,
@@ -100,7 +270,7 @@ var BB_DEMO = [
     ],
   },
   {
-    title: `능력에 맞게 치기`,
+    title: `능력에 맞게`,
     bases: [!1, !1, !1],
     outs: 0,
     variants: [
@@ -172,7 +342,7 @@ var BB_DEMO = [
     ],
   },
   {
-    title: `희생타로 득점하기`,
+    title: `희생플라이`,
     bases: [!1, !1, !0],
     outs: 1,
     batter: `우타 · 보통 주력`,
@@ -204,7 +374,7 @@ var BB_DEMO = [
   // ── 수비 전략 (side: def). 선택지의 fielders는 그 선택으로 바뀐 수비 위치({}는 기본 위치) ──
   {
     side: `def`,
-    title: `타자에 맞춰 수비 위치 잡기`,
+    title: `타자 맞춤 위치`,
     bases: [!1, !1, !1],
     outs: 0,
     batter: `좌타 · 힘이 셈 (오른쪽으로 멀리 당겨치는 편)`,
@@ -253,7 +423,7 @@ var BB_DEMO = [
   },
   {
     side: `def`,
-    title: `빈 곳 없이 간격 맞추기`,
+    title: `간격 맞추기`,
     bases: [!1, !1, !1],
     outs: 0,
     batter: `우타 · 보통 주력`,
@@ -314,7 +484,7 @@ var BB_DEMO = [
   },
   {
     side: `def`,
-    title: `빠른 송구로 앞선 주자 잡기`,
+    title: `앞선 주자 잡기`,
     bases: [!0, !1, !1],
     outs: 0,
     batter: `우타 · 보통 주력`,
@@ -354,7 +524,7 @@ function bbDemoCase(card, vi = 0) {
 }
 // 선택지까지 반영한 sim.js 옵션
 function bbDemoSim(c, op) {
-  return { demo: !0, fielders: op.fielders ?? c.fielders, batRun: c.batRun, orders: op.orders, ...op.sim };
+  return { demo: !0, fielders: op.fielders ?? c.fielders, batRun: op.batRun ?? c.batRun, orders: op.orders, ...op.sim };
 }
 // 목록·안내판의 이름: 기초 1, 공격 1~5, 수비 1~4 (side 없으면 공격)
 var BB_DEMO_SIDES = { basic: `기초`, atk: `공격`, def: `수비` };

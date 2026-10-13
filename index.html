@@ -133,7 +133,8 @@ var BB_SIM = (() => {
   // DEMO 상황용(없으면 기존과 같음): fielders 수비 위치 덮어쓰기, demo 실책·무작위 없음,
   // batRun 타자 주력(m/s), orders [{ t, id, base }] 정해진 시각에 주자 지시,
   // miss 뜬공·직선타를 수비수가 뒤로 빠뜨림(backup이면 다른 수비수가 받아 줌, 아니면 놓친 수비수가 쫓아감),
-  // firstThrow { base, carry } 공을 잡은 수비수의 첫 송구(carry면 공을 들고 그 베이스까지 뜀)
+  // firstThrow { base, carry } 공을 잡은 수비수의 첫 송구(carry면 공을 들고 그 베이스까지 뜀),
+  // noChase 파울 뜬공을 아무도 쫓지 않음
   function start(bb, st) {
     let FM = st.fielders ? { ...BB_FIELD_M, ...st.fielders } : BB_FIELD_M,
       c = cfg(st.diff),
@@ -249,7 +250,7 @@ var BB_SIM = (() => {
         H = (9.8 * bb.T ** 2) / 8,
         lateral = bb.D * Math.sin(((Math.abs(bb.phi) - 45) * Math.PI) / 180),
         best = null;
-      if (lateral < 16 && bb.D < 75)
+      if (lateral < 16 && bb.D < 75 && !st.noChase)
         for (let k of [`catcher`, `inf-1b`, `inf-3b`, `pitcher`, `out-lf`, `out-rf`]) {
           let n = need(k, L, 1.5);
           n <= bb.T + 0.1 && (!best || n < best.n) && (best = { k, n });
@@ -506,6 +507,14 @@ var BB_SIM = (() => {
           P.caught = { key: ev.key, p: ev.p, t: P.t };
           out(bat, 0, !0, ev.key); // 뜬공 아웃 (이때 들어온 득점은 인정 안 됨 → force 취급)
           if (P.done) return;
+          // 잡히기 전에 홈을 밟은 주자는 원래 베이스를 다시 밟지 않았으므로 득점 취소, 아웃
+          for (let r of P.r)
+            if (r !== bat && r.state === `scored`) {
+              ((P.runs = P.runs.filter((x) => x.id !== r.id)), (r.state = `out`), (r.outT = P.t));
+              P.outs.push({ id: r.id, base: r.from, t: P.t, force: !0, by: ev.key, early: !0 });
+            }
+          P.st.outs + P.outs.length >= 3 && finish();
+          if (P.done) return;
           for (let r of P.r) {
             if (!live(r)) continue;
             // 잡혔으면 원래 베이스로 돌아가 다시 밟아야 함 (태그업)
@@ -622,6 +631,11 @@ var BB_SIM = (() => {
             arriveBase(r);
             if (P.done) return;
           } else r.s = ns;
+        }
+        // 앞 주자 추월: 뒤 주자가 앞 주자를 앞지르면 뒤 주자 아웃
+        for (let r of P.r) {
+          let l = leadOf(r);
+          if (l && live(r) && r.s > l.s + 0.03 && (out(r, Math.min(4, Math.max(1, Math.round(l.s))), !1, `pass`), P.done)) return;
         }
         // 고정 종료(파울), 홈런은 모든 주자가 홈에 들어오면
         if (P.fixedEnd != null) {
@@ -744,7 +758,7 @@ var BB_SIM = (() => {
     if (P.caught) {
       let sac = runs > 0 && total < 3;
       ((why = `${pos} ${sac ? `희생플라이` : KIND_OUT[bb.kind]}`), (label = why));
-      otherOuts.length && ((why += ` · 더블플레이`), (label = why));
+      otherOuts.length && ((why += otherOuts.some((o) => o.early) ? ` · 주자가 일찍 출발해 아웃` : ` · 더블플레이`), (label = why));
     } else if (batOut) {
       if (bat.touched === 0)
         ((why = bb.kind === `ground` ? `${pos} ${outs.length >= 2 ? `병살타` : `땅볼`}` : `${pos} → 1루 송구 아웃`), (label = why));
@@ -757,7 +771,7 @@ var BB_SIM = (() => {
         fc = otherOuts.length > 0 && (P.error || (bb.kind === `ground` && otherOuts.some((o) => o.force)));
       ((res.error = ec), ec && (res.errorBy = ev.errBy || ev.key));
       label = ec ? `${BB_POS[ev.errBy || ev.key]} 실책 출루` : fc ? `${pos} ${KIND_OUT[bb.kind]}, 야수선택` : bb.kind === `ground` && ev.infield && b === 1 ? `내야안타` : HIT[b] || `안타`;
-      otherOuts.length && ((why = otherOuts[0].force ? `${baseName(otherOuts[0].base)} 포스아웃` : throwWhy(otherOuts[0])), (label += ` (주자 ${baseName(otherOuts[0].base)}에서 아웃)`));
+      otherOuts.length && ((why = otherOuts[0].by === `pass` ? `앞 주자 추월 아웃` : otherOuts[0].force ? `${baseName(otherOuts[0].base)} 포스아웃` : throwWhy(otherOuts[0])), (label += otherOuts[0].by === `pass` ? ` (주자가 앞 주자를 앞질러 아웃)` : ` (주자 ${baseName(otherOuts[0].base)}에서 아웃)`));
       res.batterBase = b;
     }
     runs && !P.caught && (label = `${runs}타점 ` + label);
@@ -798,7 +812,7 @@ var BB_DEMO = [
   // ── 기초 규칙 (side: basic). rule은 질문 위에 보이는 규칙 설명 ──
   {
     side: `basic`,
-    title: `뜬공이 잡히면 주자는 돌아가요`,
+    title: `뜬공 잡히면 귀루`,
     bases: [!0, !1, !1],
     outs: 0,
     batter: `우타 · 보통 주력`,
@@ -823,7 +837,177 @@ var BB_DEMO = [
     ],
   },
   {
-    title: `빈 곳으로 보내기`,
+    side: `basic`,
+    title: `땅볼엔 꼭 뛰기`,
+    bases: [!0, !1, !1],
+    outs: 0,
+    batter: `우타 · 보통 주력`,
+    rule: `📏 규칙: 타자가 치면 1루로 뛰어요. 1루 주자는 자리를 비켜 줘야 하므로 땅볼이면 꼭 2루로 뛰어야 해요. 이때 수비는 공을 들고 2루를 밟기만 해도 아웃시킬 수 있어요(포스 아웃).`,
+    ask: `타자가 3루 쪽으로 느린 땅볼을 쳤어요! 1루 주자는?`,
+    options: [
+      {
+        label: `치자마자 2루로 달리기`,
+        good: !0,
+        bb: { kind: `ground`, phi: -20, v0: 16 },
+        orders: [{ t: 0.05, id: `runner-1`, base: 2 }],
+        expect: { outs: 1, bases: [!1, !0, !1] },
+        explain: `빨리 출발해 2루에서 살았어요! 수비는 타자만 1루에서 잡았어요. 땅볼이면 1루 주자는 망설이지 말고 뛰어요.`,
+      },
+      {
+        label: `잡히는지 보고 천천히 출발하기`,
+        good: !1,
+        bb: { kind: `ground`, phi: -20, v0: 16 },
+        orders: [
+          { t: 0.05, id: `runner-1`, base: 1 },
+          { t: 1.6, id: `runner-1`, base: 2 },
+        ],
+        expect: { outs: 1, bases: [!0, !1, !1] },
+        explain: `늦게 출발해 2루에서 포스 아웃! 땅볼일 때 1루 주자는 꼭 바로 뛰어야 해요.`,
+      },
+    ],
+  },
+  {
+    side: `basic`,
+    title: `2아웃엔 바로 뛰기`,
+    bases: [!1, !0, !1],
+    outs: 2,
+    batter: `우타 · 보통 주력`,
+    rule: `📏 규칙: 3아웃이 되면 공수 교대예요. 2아웃이면 공이 잡혀도 어차피 공격이 끝나니, 주자는 치자마자 뛰어요.`,
+    ask: `타자가 공을 쳤어요! 2루 주자는?`,
+    options: [
+      {
+        label: `치자마자 홈까지 달리기`,
+        good: !0,
+        bb: { kind: `line`, phi: 5, D: 62, T: 1.63 },
+        orders: [{ t: 0.05, id: `runner-2`, base: 4 }],
+        expect: { runs: 1 },
+        explain: `바로 출발해 홈까지 들어왔어요! 2아웃에서는 기다릴 필요가 없어요.`,
+      },
+      {
+        label: `공이 떨어지는지 보고 출발하기`,
+        good: !1,
+        bb: { kind: `line`, phi: 5, D: 62, T: 1.63 },
+        orders: [
+          { t: 0.05, id: `runner-2`, base: 2 },
+          { t: 1.9, id: `runner-2`, base: 3 },
+        ],
+        expect: { runs: 0, bases: [!0, !1, !0] },
+        explain: `기다리다 늦게 출발해 3루에서 멈췄어요. 2아웃이면 바로 뛰어야 점수를 낼 수 있어요.`,
+      },
+    ],
+  },
+  {
+    side: `basic`,
+    title: `1루는 달려 통과`,
+    bases: [!1, !1, !1],
+    outs: 0,
+    batter: `우타 · 보통 주력`,
+    rule: `📏 규칙: 1루는 밟고 지나쳐 달려도 아웃이 아니에요. (2루·3루는 지나치면 태그 아웃될 수 있어요.)`,
+    ask: `유격수 쪽으로 깊은 땅볼을 쳤어요! 1루까지 어떻게 달릴까요?`,
+    options: [
+      {
+        label: `1루를 지나치듯 끝까지 전력 질주`,
+        good: !0,
+        batRun: 7.6,
+        bb: { kind: `ground`, phi: -17, v0: 20 },
+        expect: { outs: 0, bases: [!0, !1, !1] },
+        explain: `속도를 줄이지 않고 달려 1루에서 살았어요(내야안타)! 1루는 지나쳐 달려도 돼요.`,
+      },
+      {
+        label: `1루에 멈추려고 앞에서 속도 줄이기`,
+        good: !1,
+        batRun: 6.6,
+        bb: { kind: `ground`, phi: -17, v0: 20 },
+        expect: { outs: 1 },
+        explain: `멈추려고 속도를 줄인 사이 공이 먼저 1루에 왔어요. 1루는 끝까지 달려 지나가요.`,
+      },
+    ],
+  },
+  {
+    side: `basic`,
+    title: `태그업`,
+    bases: [!1, !1, !0],
+    outs: 1,
+    batter: `우타 · 보통 주력`,
+    rule: `📏 규칙: 뜬공이 잡힌 뒤에도 주자는 원래 베이스를 다시 밟고 출발하면 다음 루로 갈 수 있어요(태그업). 잡히기 전에 출발하면 다시 돌아와 밟아야 해요.`,
+    ask: `외야로 높은 뜬공! 3루 주자는?`,
+    options: [
+      {
+        label: `3루를 밟고 있다가, 잡히는 순간 출발`,
+        good: !0,
+        bb: { kind: `fly`, phi: 8, D: 84, T: 4 },
+        expect: { runs: 1, outs: 1 },
+        explain: `잡힌 순간 출발해 홈인! 태그업으로 1점을 냈어요.`,
+      },
+      {
+        label: `치자마자 홈으로 달리기`,
+        good: !1,
+        bb: { kind: `fly`, phi: 8, D: 84, T: 4 },
+        orders: [{ t: 0.2, id: `runner-3`, base: 4 }],
+        expect: { runs: 0, outs: 2 },
+        explain: `잡히기 전에 출발해 3루를 다시 밟지 않았으니 득점 취소, 주자도 아웃이에요.`,
+      },
+    ],
+  },
+  {
+    side: `basic`,
+    defense: !0,
+    title: `파울 뜬공도 아웃`,
+    bases: [!1, !1, !1],
+    outs: 0,
+    batter: `우타 · 보통 주력`,
+    rule: `📏 규칙: 파울 지역에 뜬 공이라도 땅에 닿기 전에 잡으면 타자는 아웃이에요.`,
+    ask: `1루 쪽 파울 지역으로 뜬공이 날아가요! 1루수는?`,
+    options: [
+      {
+        label: `끝까지 쫓아가 잡기`,
+        good: !0,
+        bb: { kind: `fly`, foul: !0, phi: 52, D: 30, T: 3.2 },
+        expect: { outs: 1 },
+        explain: `파울 뜬공을 잡아 타자 아웃! 파울이라도 끝까지 쫓아가요.`,
+      },
+      {
+        label: `파울이니까 그냥 두기`,
+        good: !1,
+        sim: { noChase: !0 },
+        bb: { kind: `fly`, foul: !0, phi: 52, D: 30, T: 3.2 },
+        expect: { outs: 0 },
+        explain: `잡을 수 있었는데 포기해서 타자에게 다시 칠 기회를 줬어요.`,
+      },
+    ],
+  },
+  {
+    side: `basic`,
+    title: `앞 주자 추월 금지`,
+    bases: [!0, !1, !0],
+    outs: 1,
+    batter: `우타 · 보통 주력`,
+    rule: `📏 규칙: 뒤에 있는 주자가 앞 주자를 앞질러 가면 앞지른 주자가 아웃이에요. 달릴 때는 앞 주자를 보며 달려요.`,
+    ask: `안타! 그런데 3루 주자가 홈으로 갈지 망설이며 3루에 멈췄어요. 1루 주자는?`,
+    options: [
+      {
+        label: `앞 주자를 보며 2루까지만 가기`,
+        good: !0,
+        bb: { kind: `line`, phi: -15, D: 58, T: 1.54 },
+        orders: [{ t: 1.64, id: `runner-3`, base: 3 }],
+        expect: { outs: 0, bases: [!0, !0, !0] },
+        explain: `앞 주자를 보고 2루에서 멈춰 1사 만루로 기회를 이어 갔어요!`,
+      },
+      {
+        label: `앞만 보고 홈까지 달리기`,
+        good: !1,
+        bb: { kind: `line`, phi: -15, D: 58, T: 1.54 },
+        orders: [
+          { t: 0.15, id: `runner-1`, base: 4 },
+          { t: 1.64, id: `runner-3`, base: 3 },
+        ],
+        expect: { outs: 1, runs: 0 },
+        explain: `3루에 멈춘 앞 주자를 앞질러 아웃! 달릴 때는 앞 주자가 어디 있는지 꼭 봐요.`,
+      },
+    ],
+  },
+  {
+    title: `빈 곳으로`,
     bases: [!1, !1, !1],
     outs: 0,
     batter: `우타 · 보통 주력`,
@@ -863,7 +1047,7 @@ var BB_DEMO = [
     ],
   },
   {
-    title: `안전하게 진루하기`,
+    title: `안전한 진루`,
     bases: [!1, !0, !1],
     outs: 1,
     batter: `우타 · 보통 주력`,
@@ -889,7 +1073,7 @@ var BB_DEMO = [
     ],
   },
   {
-    title: `능력에 맞게 치기`,
+    title: `능력에 맞게`,
     bases: [!1, !1, !1],
     outs: 0,
     variants: [
@@ -961,7 +1145,7 @@ var BB_DEMO = [
     ],
   },
   {
-    title: `희생타로 득점하기`,
+    title: `희생플라이`,
     bases: [!1, !1, !0],
     outs: 1,
     batter: `우타 · 보통 주력`,
@@ -993,7 +1177,7 @@ var BB_DEMO = [
   // ── 수비 전략 (side: def). 선택지의 fielders는 그 선택으로 바뀐 수비 위치({}는 기본 위치) ──
   {
     side: `def`,
-    title: `타자에 맞춰 수비 위치 잡기`,
+    title: `타자 맞춤 위치`,
     bases: [!1, !1, !1],
     outs: 0,
     batter: `좌타 · 힘이 셈 (오른쪽으로 멀리 당겨치는 편)`,
@@ -1042,7 +1226,7 @@ var BB_DEMO = [
   },
   {
     side: `def`,
-    title: `빈 곳 없이 간격 맞추기`,
+    title: `간격 맞추기`,
     bases: [!1, !1, !1],
     outs: 0,
     batter: `우타 · 보통 주력`,
@@ -1103,7 +1287,7 @@ var BB_DEMO = [
   },
   {
     side: `def`,
-    title: `빠른 송구로 앞선 주자 잡기`,
+    title: `앞선 주자 잡기`,
     bases: [!0, !1, !1],
     outs: 0,
     batter: `우타 · 보통 주력`,
@@ -1143,7 +1327,7 @@ function bbDemoCase(card, vi = 0) {
 }
 // 선택지까지 반영한 sim.js 옵션
 function bbDemoSim(c, op) {
-  return { demo: !0, fielders: op.fielders ?? c.fielders, batRun: c.batRun, orders: op.orders, ...op.sim };
+  return { demo: !0, fielders: op.fielders ?? c.fielders, batRun: op.batRun ?? c.batRun, orders: op.orders, ...op.sim };
 }
 // 목록·안내판의 이름: 기초 1, 공격 1~5, 수비 1~4 (side 없으면 공격)
 var BB_DEMO_SIDES = { basic: `기초`, atk: `공격`, def: `수비` };
@@ -2085,6 +2269,7 @@ function b() {
           for (let id of [`runner-t`, `runner-1`, `runner-2`, `runner-3`]) a.current[id]?.classList.remove(`manual`);
           if (sim.foul && !sim.foulOut) {
             (e.strikes < 2 && e.strikes++, E(`FOUL`, `#e67e22`), (e.statusText = `파울!`), T());
+            if (e.mode === `DEMO`) return void S(() => ((e.demo.phase = `result`), T()), 1200);
             next(700);
             return;
           }
@@ -3369,7 +3554,7 @@ function DemoPanel({ demo, onPick, onRetry, onNext, onList }) {
   if (!demo) return null;
   let c = demo.c,
     occ = [1, 2, 3].filter((b) => c.bases[b - 1]),
-    sit = `${c.outs ? `${c.outs}사` : `무사`} ${occ.length ? `${occ.join('·')}루` : `주자 없음`} · ${c.side === `def` ? `상대 타자` : `타자`}: ${c.batter}`,
+    sit = `${c.outs ? `${c.outs}사` : `무사`} ${occ.length ? `${occ.join('·')}루` : `주자 없음`} · ${c.side === `def` || c.defense ? `상대 타자` : `타자`}: ${c.batter}`,
     op = demo.pick != null ? c.options[demo.pick] : null,
     head = (0, S.jsxs)(`div`, {
       className: `top`,
@@ -3742,7 +3927,7 @@ function oe({ visible: e, onSelect: t, initStep }) {
                   className: side === `basic` ? `wide` : ``,
                   children: [
                     (0, S.jsx)(`b`, { children: { basic: `🌱 기초 규칙`, atk: `🏏 공격 전략`, def: `🛡️ 수비 전략` }[side] }),
-                    ...BB_DEMO.map((c, i) => ((c.side || `atk`) === side ? btn(`${bbDemoName(i)} · ${c.title}`, () => t({ mode: `DEMO`, card: i })) : null)),
+                    ...BB_DEMO.map((c, i) => ((c.side || `atk`) === side ? btn(`${bbDemoName(i).split(` `)[1]}. ${c.title}`, () => t({ mode: `DEMO`, card: i })) : null)),
                   ],
                 },
                 side,
@@ -4134,9 +4319,10 @@ function ce() {
 .bb-tga-intro li+li{margin-top:3px}
 .bb-demo-list{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .bb-demo-list>div{display:flex;flex-direction:column;gap:6px}
-.bb-demo-list .wide{grid-column:1/-1}
+.bb-demo-list .wide{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.bb-demo-list .wide b{grid-column:1/-1}
 .bb-demo-list b{font-size:13px;color:#f1c40f;text-align:left}
-.bb-demo-list .bb-btn{font-size:12.5px;padding:8px 10px;text-align:left}
+.bb-demo-list .bb-btn{font-size:13.5px;padding:7px 10px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media (max-width:640px){.bb-demo-list{grid-template-columns:1fr}}
 .bb-demo-head{font-size:13px;color:#bbb;margin:2px 0 4px;text-align:left}
 /* DEMO 안내판: 경기장 아래(조작 버튼 자리)에 넓게, 큰 글씨 */

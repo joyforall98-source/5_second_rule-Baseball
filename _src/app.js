@@ -523,6 +523,7 @@ function b() {
           for (let id of [`runner-t`, `runner-1`, `runner-2`, `runner-3`]) a.current[id]?.classList.remove(`manual`);
           if (sim.foul && !sim.foulOut) {
             (e.strikes < 2 && e.strikes++, E(`FOUL`, `#e67e22`), (e.statusText = `파울!`), T());
+            if (e.mode === `DEMO`) return void S(() => ((e.demo.phase = `result`), T()), 1200);
             next(700);
             return;
           }
@@ -1807,7 +1808,7 @@ function DemoPanel({ demo, onPick, onRetry, onNext, onList }) {
   if (!demo) return null;
   let c = demo.c,
     occ = [1, 2, 3].filter((b) => c.bases[b - 1]),
-    sit = `${c.outs ? `${c.outs}사` : `무사`} ${occ.length ? `${occ.join('·')}루` : `주자 없음`} · ${c.side === `def` ? `상대 타자` : `타자`}: ${c.batter}`,
+    sit = `${c.outs ? `${c.outs}사` : `무사`} ${occ.length ? `${occ.join('·')}루` : `주자 없음`} · ${c.side === `def` || c.defense ? `상대 타자` : `타자`}: ${c.batter}`,
     op = demo.pick != null ? c.options[demo.pick] : null,
     head = (0, S.jsxs)(`div`, {
       className: `top`,
@@ -2180,7 +2181,7 @@ function oe({ visible: e, onSelect: t, initStep }) {
                   className: side === `basic` ? `wide` : ``,
                   children: [
                     (0, S.jsx)(`b`, { children: { basic: `🌱 기초 규칙`, atk: `🏏 공격 전략`, def: `🛡️ 수비 전략` }[side] }),
-                    ...BB_DEMO.map((c, i) => ((c.side || `atk`) === side ? btn(`${bbDemoName(i)} · ${c.title}`, () => t({ mode: `DEMO`, card: i })) : null)),
+                    ...BB_DEMO.map((c, i) => ((c.side || `atk`) === side ? btn(`${bbDemoName(i).split(` `)[1]}. ${c.title}`, () => t({ mode: `DEMO`, card: i })) : null)),
                   ],
                 },
                 side,
