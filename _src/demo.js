@@ -6,6 +6,33 @@
 // expect는 demotest.js가 확인하는 결과 (득점 runs, 늘어난 아웃 outs, 끝난 뒤 주자 bases)
 // 선택지의 fielders(있으면 카드의 수비 위치 대신), sim(miss·backup·firstThrow 등)은 sim.js 옵션
 var BB_DEMO = [
+  // ── 기초 규칙 (side: basic). rule은 질문 위에 보이는 규칙 설명 ──
+  {
+    side: `basic`,
+    title: `뜬공이 잡히면 주자는 돌아가요`,
+    bases: [!0, !1, !1],
+    outs: 0,
+    batter: `우타 · 보통 주력`,
+    rule: `📏 규칙: 뜬공이 땅에 닿기 전에 잡히면 타자는 아웃! 주자는 원래 있던 베이스를 다시 밟아야 해요. 돌아오기 전에 공이 그 베이스에 먼저 오면 주자도 아웃이에요.`,
+    ask: `타자가 높은 뜬공을 쳤어요! 1루 주자는 어떻게 할까요?`,
+    options: [
+      {
+        label: `공이 잡히는지 보면서 1루 가까이에서 기다리기`,
+        good: !0,
+        bb: { kind: `fly`, phi: 25, D: 70, T: 3.5 },
+        expect: { outs: 1, bases: [!0, !1, !1] },
+        explain: `뜬공이 잡혀 타자만 아웃! 기다린 주자는 바로 1루로 돌아와 살았어요. 뜬공이 뜨면 먼저 잡히는지 봐요.`,
+      },
+      {
+        label: `치자마자 2루로 힘껏 달리기`,
+        good: !1,
+        bb: { kind: `fly`, phi: 25, D: 70, T: 3.5 },
+        orders: [{ t: 0.2, id: `runner-1`, base: 2 }],
+        expect: { outs: 2, bases: [!1, !1, !1] },
+        explain: `공이 잡히면 1루로 돌아가 베이스를 다시 밟아야 해요. 너무 멀리 달려서 돌아오기 전에 공이 1루에 먼저 와 주자까지 아웃! (한 번에 아웃 2개)`,
+      },
+    ],
+  },
   {
     title: `빈 곳으로 보내기`,
     bases: [!1, !1, !1],
@@ -329,9 +356,10 @@ function bbDemoCase(card, vi = 0) {
 function bbDemoSim(c, op) {
   return { demo: !0, fielders: op.fielders ?? c.fielders, batRun: c.batRun, orders: op.orders, ...op.sim };
 }
-// 목록·안내판의 이름: 공격 1~5, 수비 1~4
+// 목록·안내판의 이름: 기초 1, 공격 1~5, 수비 1~4 (side 없으면 공격)
+var BB_DEMO_SIDES = { basic: `기초`, atk: `공격`, def: `수비` };
 function bbDemoName(ci) {
-  let def = BB_DEMO[ci].side === `def`;
-  return `${def ? `수비` : `공격`} ${BB_DEMO.slice(0, ci + 1).filter((x) => (x.side === `def`) === def).length}`;
+  let side = BB_DEMO[ci].side || `atk`;
+  return `${BB_DEMO_SIDES[side]} ${BB_DEMO.slice(0, ci + 1).filter((x) => (x.side || `atk`) === side).length}`;
 }
 typeof module !== `undefined` && (module.exports = { BB_DEMO, bbDemoCase, bbDemoSim });

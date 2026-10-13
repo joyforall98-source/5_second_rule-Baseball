@@ -445,13 +445,15 @@ function b() {
           (e.totalScore += r),
           (e.strikes = 0),
           (e.balls = 0),
-          e.teams[e.bat].b++,
-          (e.statusText = n ? `밀어내기 볼넷!` : `볼넷 출루!`),
-          E(n ? `밀어내기 볼넷` : `볼넷`, n ? `#f1c40f` : `#2ecc71`),
+          e.teams[e.bat].b++);
+        let why = e.hbp ? `몸에 맞는 공` : `볼넷`;
+        ((e.hbp = !1),
+          (e.statusText = n ? `밀어내기 ${why}!` : `${why} 출루!`),
+          E(n ? `밀어내기 ${why}` : why, n ? `#f1c40f` : `#2ecc71`),
           e.hitLog.push({
             batter: e.batterNumber,
             team: e.bat,
-            hitType: n ? `밀어내기 볼넷` : `볼넷`,
+            hitType: n ? `밀어내기 ${why}` : why,
             rbis: r,
             scoreAfter: e.totalScore,
             time: Date.now(),
@@ -590,9 +592,47 @@ function b() {
         }, 16)));
     },
     // 투구가 포수 미트에 들어간 뒤의 판정 (지켜봄 또는 헛스윙)
+    // 폭투·포일: 포수가 공을 놓쳐 뒤로 빠지면 누상 주자가 한 베이스씩 진루 (3루 주자는 득점)
+    wildPitch = (kind, done) => {
+      let e = o.current,
+        ball = t.current,
+        cat = i.current.catcher,
+        from = bbPx(BB_FIELD_M.catcher),
+        to = bbPx({ x: bbRand(-10, 10), y: -12 }),
+        occ = [3, 2, 1].filter((b) => e.baseStatus[b - 1]),
+        mix = (p, q, k) => ({ bottom: p.bottom + (q.bottom - p.bottom) * k, left: p.left + (q.left - p.left) * k }),
+        put = (el, q) => el && ((el.style.bottom = q.bottom + `px`), (el.style.left = q.left + `%`)),
+        f = 0;
+      ((e.fieldView = `top-down-view`),
+        (e.statusText = kind === `폭투` ? `폭투! 공이 뒤로 빠졌다` : `포일! 포수가 공을 놓쳤다`),
+        E(kind, `#e67e22`),
+        ie(),
+        ball && ((ball.style.display = `block`), (ball.style.transform = `translateX(-50%) translateZ(4px) rotateX(-90deg)`)),
+        T());
+      d.current = setInterval(() => {
+        if (e.paused) return;
+        f = Math.min(1, f + 0.03);
+        (put(ball, mix(from, to, Math.min(1, f * 1.6))), put(cat, mix(from, to, Math.max(0, f - 0.25)))); // 공이 굴러가고 포수가 쫓아감
+        for (let b of occ) put(a.current[`runner-${b}`], mix(v[b], v[b + 1], f));
+        if (f < 1) return;
+        d.current &&= (clearInterval(d.current), null);
+        let bs = e.baseStatus,
+          runs = +!!bs[2];
+        ((e.baseStatus = [!1, bs[0], bs[1]]),
+          (e.totalScore += runs),
+          (e.statusText = `${kind}로 주자 진루${runs ? ` · 1점 득점` : ``}`),
+          e.hitLog.push({ batter: e.batterNumber, team: e.bat, hitType: `${kind}로 주자 진루`, rbis: 0, scoreAfter: e.totalScore, time: Date.now() }),
+          T());
+        S(() => (re(), done()), 900);
+      }, 30);
+    },
     fe = () => {
       let e = o.current,
-        P = e.pitch;
+        P = e.pitch,
+        // 몸에 맞는 공: 타자 쪽(우타는 -x)으로 크게 빠진 공을 치지 않으면 가끔
+        hbp = !e.swingMiss && P && P.zx * (e.lineup[e.batterNumber - 1] === `R` ? -1 : 1) > 1.55 && P.zy > -1.3 && Math.random() < 0.08,
+        // 폭투(땅에 박히는 낮은 공) · 포일(그 밖에 드물게): 주자가 있을 때
+        wild = !hbp && P && e.baseStatus.some(Boolean) ? (P.zy < -1.4 ? Math.random() < 0.15 && `폭투` : Math.random() < 0.004 && `포일`) : !1;
       (e.swingMiss || bvRef.current.rig?.batter(`take`),
         (e.stealWindow = !1),
         (e.isSwung = !0),
@@ -608,9 +648,11 @@ function b() {
               (e.swingFeedback = { text: `BALL`, color: `#2ecc71` })),
         P &&
           (e.pitchInfo = `${P.name} ${P.kmh}km/h · ${P.isStrike ? `스트라이크존` : `볼`}`),
+        hbp && ((e.hbp = !0), (e.balls = 4), (e.swingFeedback = { text: `몸에 맞는 공`, color: `#e67e22` })),
         (e.fieldView = `catcher-view`),
-        T(),
-        oe() || S(ae, 1200));
+        T());
+      // 폭투·포일은 볼넷·삼진이 아닐 때만 (낫아웃은 다루지 않음)
+      wild && e.balls < 4 && e.strikes < 3 ? wildPitch(wild, () => oe() || S(ae, 1200)) : oe() || S(ae, 1200);
     },
     pe = (0, _.useCallback)(() => {
       let e = o.current,
@@ -1706,6 +1748,7 @@ function DemoPanel({ demo, onPick, onRetry, onNext, onList }) {
         children: [
           head,
           (0, S.jsx)(`div`, { className: `sit`, children: sit }),
+          c.rule && (0, S.jsx)(`div`, { className: `rule`, children: c.rule }),
           (0, S.jsx)(`div`, { className: `ask`, children: c.ask }),
           (0, S.jsx)(`div`, { className: `opts`, children: c.options.map((o, k) => (0, S.jsx)(`button`, { onClick: () => onPick(k), children: `${k + 1}. ${o.label}` }, k)) }),
           (0, S.jsx)(`div`, { className: `note`, children: `※ 발야구라면 '치기'는 '차기'로, 우타·좌타는 오른발·왼발잡이로 생각하세요.` }),
@@ -1786,7 +1829,9 @@ var HOWTO = [
   [`연장`, `동점이면 무사 2루 승부치기`],
   [`콜드`, `5회 15점 · 7회 10점 차 (5·9이닝)`],
   [`TGA`, `9회말 2·4·5점 차(EASY·SOSO·HARD) — 역전`],
-  [`DEMO`, `상황 카드로 공격·수비 전략 배우기 (선택 → 플레이 → 해설)`],
+  [`DEMO`, `상황 카드로 기초 규칙·공격·수비 전략 배우기`],
+  [`사사구`, `볼넷·몸에 맞는 공 → 타자 1루`],
+  [`폭투·포일`, `공이 뒤로 빠지면 주자 한 베이스씩`],
 ];
 function HowTo() {
   return (0, S.jsx)(`div`, {
@@ -2048,13 +2093,14 @@ function oe({ visible: e, onSelect: t, initStep }) {
           `div`,
           {
             className: `bb-demo-list`,
-            children: [`atk`, `def`].map((side) =>
+            children: [`basic`, `atk`, `def`].map((side) =>
               (0, S.jsxs)(
                 `div`,
                 {
+                  className: side === `basic` ? `wide` : ``,
                   children: [
-                    (0, S.jsx)(`b`, { children: side === `def` ? `🛡️ 수비 전략` : `🏏 공격 전략` }),
-                    ...BB_DEMO.map((c, i) => ((c.side === `def`) === (side === `def`) ? btn(`${bbDemoName(i)} · ${c.title}`, () => t({ mode: `DEMO`, card: i })) : null)),
+                    (0, S.jsx)(`b`, { children: { basic: `🌱 기초 규칙`, atk: `🏏 공격 전략`, def: `🛡️ 수비 전략` }[side] }),
+                    ...BB_DEMO.map((c, i) => ((c.side || `atk`) === side ? btn(`${bbDemoName(i)} · ${c.title}`, () => t({ mode: `DEMO`, card: i })) : null)),
                   ],
                 },
                 side,

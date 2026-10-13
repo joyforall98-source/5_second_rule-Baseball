@@ -42,6 +42,7 @@
 .bb-tga-intro li+li{margin-top:3px}
 .bb-demo-list{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .bb-demo-list>div{display:flex;flex-direction:column;gap:6px}
+.bb-demo-list .wide{grid-column:1/-1}
 .bb-demo-list b{font-size:13px;color:#f1c40f;text-align:left}
 .bb-demo-list .bb-btn{font-size:12.5px;padding:8px 10px;text-align:left}
 @media (max-width:640px){.bb-demo-list{grid-template-columns:1fr}}
@@ -50,6 +51,7 @@
   border-radius:10px;padding:12px 14px;color:#eee;font-size:13.5px;line-height:1.55;text-align:left}
 .bb-demo h3{margin:0 0 2px;font-size:15px;color:#5dade2}
 .bb-demo .sit{color:#bbb;font-size:12.5px}
+.bb-demo .rule{margin:6px 0 0;padding:6px 8px;border-radius:6px;background:#27ae6026;border:1px solid #27ae6066;color:#d5f5e3;font-size:12.5px}
 .bb-demo .ask{margin:6px 0 8px;font-weight:800}
 .bb-demo .opts{display:flex;flex-direction:column;gap:6px}
 .bb-demo button{cursor:pointer;border:none;border-radius:6px;padding:8px 10px;font:inherit;font-weight:800;color:#fff;background:#2c3e50;text-align:left}

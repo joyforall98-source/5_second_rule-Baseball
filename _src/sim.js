@@ -394,8 +394,10 @@ var BB_SIM = (() => {
         return null;
       },
       limitOf = (r) => {
-        let l = leadOf(r);
-        return l ? (l.target >= 4 ? 4 : l.target - 1) : 4;
+        let l = leadOf(r),
+          lim = l ? (l.target >= 4 ? 4 : l.target - 1) : 4;
+        // 타자는 언제나 1루까지는 감 (앞 주자가 뜬공을 보며 1루 근처에서 기다려도 홈으로 되돌아가지 않음)
+        return r === bat ? Math.max(1, lim) : lim;
       },
       minOf = (r) => (r === bat ? 1 : r.forced ? r.from + 1 : r.touched),
       setTarget = (r, k) => {
