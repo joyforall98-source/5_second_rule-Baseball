@@ -370,6 +370,8 @@ var BB_SIM = (() => {
     ev.errBy && ev.errBy !== ev.key && (P.f[ev.errBy].goal = { ...ev.missP });
     // 외야로 간 타구: 2루를 맡지 않은 유격수·2루수가 중계하러 외야수와 2루 사이로 나감 (DEMO는 그대로)
     !st.demo && OF.includes(ev.key) && (P.f[P.cover[2] === `inf-ss` ? `inf-2b` : `inf-ss`].goal = lerp(BB_BASES[2], ev.p, 0.35));
+    // 투수 1루 커버: 바로 출발해 1루 앞 파울라인(4m 전)을 거쳐 선을 따라 베이스로 (DEMO는 그대로)
+    !st.demo && P.cover[1] === `pitcher` && ((P.f.pitcher.startAt = c.react), (P.f.pitcher.via = { x: 16.6, y: 16.6 }));
 
     // ── 주자 출발 ──
     let two = st.outs === 2;
@@ -460,14 +462,24 @@ var BB_SIM = (() => {
         for (let i = 0; i < idx(r); i++) P.r[i].forced = !1;
         P.st.outs + P.outs.length >= 3 && finish();
       },
+      // 베이스 k를 맡은 수비수가 그 베이스에 닿기까지 남은 시간 (공을 든 선수가 맡았으면 0)
+      recvT = (k) => {
+        let key = P.cover[k],
+          f = P.f[key],
+          B = BB_BASES[k];
+        if (key === P.holder) return 0;
+        return Math.max(0, f.startAt - P.t) + (f.via ? dist(f, f.via) + dist(f.via, B) : dist(f, B)) / f.spd;
+      },
       throwTo = (k, carry) => {
         let h = P.f[P.holder],
           from = { x: h.x, y: h.y },
           to = BB_BASES[k],
           d = dist(from, to),
           tt = carry || d < 7 ? d / c.ifSpd + 0.1 : thrT(from, k), // 가까우면 직접 들고 뛰어감
-          rec = carry || P.cover[k] === P.holder ? P.holder : P.cover[k];
-        ((P.ball = { mode: `thrown`, from, to, t0: P.t, t1: P.t + tt, toBase: k, receiver: rec, by: P.holder, x: from.x, y: from.y, h: 1.5 }),
+          rec = carry || P.cover[k] === P.holder || (!P.st.demo && d < 7) ? P.holder : P.cover[k],
+          // 받을 선수가 아직 오는 중이면 기다렸다가, 베이스에 닿는 순간 공이 도착하게 던짐 (DEMO는 그대로)
+          wait = !P.st.demo && rec !== P.holder ? Math.max(0, recvT(k) - tt) : 0;
+        ((P.ball = { mode: `thrown`, from, to, t0: P.t + wait, t1: P.t + wait + tt, toBase: k, receiver: rec, by: P.holder, x: from.x, y: from.y, h: 1.5 }),
           (P.holderBase = null),
           P.throws++,
           rec !== P.holder && (P.f[rec].goal = { ...to }));
@@ -482,7 +494,8 @@ var BB_SIM = (() => {
           from = { x: h.x, y: h.y },
           to = lerp(BB_BASES[k], from, 0.4),
           key = k === 4 ? (h.x < -15 ? `inf-3b` : `inf-1b`) : P.cover[2] === `inf-ss` ? `inf-2b` : `inf-ss`;
-        for (let j = 1; j <= 3; j++) P.cover[j] === key && ((P.cover[j] = `pitcher`), (P.f.pitcher.goal = { ...BB_BASES[j] }));
+        for (let j = 1; j <= 3; j++) P.cover[j] === key && ((P.cover[j] = `pitcher`), (P.f.pitcher.goal = { ...BB_BASES[j] }), (P.f.pitcher.via = null));
+        P.f[key].via = null;
         ((P.ball = { mode: `thrown`, from, to, t0: P.t, t1: P.t + dist(from, to) / c.thr, toBase: null, receiver: key, by: P.holder, x: from.x, y: from.y, h: 1.5 }),
           (P.holderBase = null),
           P.throws++,
@@ -494,7 +507,7 @@ var BB_SIM = (() => {
       ofDefense = () => {
         let h = P.f[P.holder],
           via = (k) => dist(h, BB_BASES[k]) > 45,
-          tOf = (k) => (via(k) ? dist(h, BB_BASES[k]) / c.thr + 0.3 : thrT(h, k)),
+          tOf = (k) => Math.max(via(k) ? dist(h, BB_BASES[k]) / c.thr + 0.3 : thrT(h, k), recvT(k)),
           best = null;
         for (let r of P.r) {
           if (!live(r) || r.delay > 0.5 || r.state !== `run` || r.target < 1) continue;
@@ -530,8 +543,9 @@ var BB_SIM = (() => {
           let k = r.state === `run` ? r.target : null;
           if (k == null || P.holderBase === k || k < 1) continue;
           let d = dist(h, BB_BASES[k]),
-            tt = Math.min(d < 7 ? d / c.ifSpd + 0.1 : 99, thrT(h, k)),
-            rt = runnerTime(r, k),
+            tt = Math.min(d < 7 ? d / c.ifSpd + 0.1 : 99, thrT(h, k));
+          !P.st.demo && d >= 7 && (tt = Math.max(tt, recvT(k))); // 받을 선수가 늦으면 그만큼 늦음 (DEMO는 그대로)
+          let rt = runnerTime(r, k),
             // 외야에서 홈·3루로 길게 던질 때는 보살 가능성이 높을 때만. 아니면 아래에서 내야로 중계해
             // 타자·뒤 주자의 추가 진루를 막음
             need = d > 45 && k >= 3 ? BB_RELAY_MARGIN : 0.05;
@@ -591,7 +605,7 @@ var BB_SIM = (() => {
         let b = P.ball,
           k = b.toBase,
           rec = P.f[b.receiver];
-        ((rec.x = b.to.x), (rec.y = b.to.y), (rec.goal = null));
+        ((rec.x = b.to.x), (rec.y = b.to.y), (rec.goal = null), (rec.via = null));
         ((P.ball = { mode: `held`, x: b.to.x, y: b.to.y, h: 1.2 }), (P.holder = b.receiver), (P.holderBase = k), (P.readyAt = P.t + (k == null ? 0.3 : 0.45))); // 중계 선수는 바로 몸을 돌려 던짐
         P.assistBy = b.by; // 이 베이스에서 나오는 아웃은 송구한 선수의 보살
         for (let r of P.r) {
@@ -618,11 +632,12 @@ var BB_SIM = (() => {
         for (let k in P.f) {
           let f = P.f[k];
           if (!f.goal || t < f.startAt) continue;
-          let dx = f.goal.x - f.x,
-            dy = f.goal.y - f.y,
+          let g = f.via || f.goal, // 거쳐 갈 지점(via)이 있으면 먼저 그곳으로
+            dx = g.x - f.x,
+            dy = g.y - f.y,
             d = Math.hypot(dx, dy),
             m = f.spd * h;
-          d <= m ? ((f.x = f.goal.x), (f.y = f.goal.y)) : ((f.x += (dx / d) * m), (f.y += (dy / d) * m));
+          d <= m ? ((f.x = g.x), (f.y = g.y), g === f.via && (f.via = null)) : ((f.x += (dx / d) * m), (f.y += (dy / d) * m));
         }
         // 공
         let b = P.ball;
