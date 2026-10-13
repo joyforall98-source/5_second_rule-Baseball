@@ -1808,7 +1808,8 @@ function DemoPanel({ demo, onPick, onRetry, onNext, onList }) {
   if (!demo) return null;
   let c = demo.c,
     occ = [1, 2, 3].filter((b) => c.bases[b - 1]),
-    sit = `${c.outs ? `${c.outs}사` : `무사`} ${occ.length ? `${occ.join('·')}루` : `주자 없음`} · ${c.side === `def` || c.defense ? `상대 타자` : `타자`}: ${c.batter}`,
+    // 기초 카드는 상황만 (타자 정보는 규칙과 상관없음)
+    sit = `${c.outs ? `${c.outs}사` : `무사`} ${occ.length ? `${occ.join('·')}루` : `주자 없음`}${c.side === `basic` ? `` : ` · ${c.side === `def` ? `상대 타자` : `타자`}: ${c.batter}`}`,
     op = demo.pick != null ? c.options[demo.pick] : null,
     head = (0, S.jsxs)(`div`, {
       className: `top`,

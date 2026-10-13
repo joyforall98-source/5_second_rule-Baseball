@@ -812,7 +812,7 @@ var BB_DEMO = [
   // ── 기초 규칙 (side: basic). rule은 질문 위에 보이는 규칙 설명 ──
   {
     side: `basic`,
-    title: `뜬공 잡히면 귀루`,
+    title: `뜬공 잡히면 돌아가기`,
     bases: [!0, !1, !1],
     outs: 0,
     batter: `우타 · 보통 주력`,
@@ -902,7 +902,7 @@ var BB_DEMO = [
     bases: [!1, !1, !1],
     outs: 0,
     batter: `우타 · 보통 주력`,
-    rule: `📏 규칙: 1루는 밟고 지나쳐 달려도 아웃이 아니에요. (2루·3루는 지나치면 태그 아웃될 수 있어요.)`,
+    rule: `📏 규칙: 1루는 밟고 지나쳐 달려도 아웃이 아니에요. 다른 루는 지나치면 안 돼요.`,
     ask: `유격수 쪽으로 깊은 땅볼을 쳤어요! 1루까지 어떻게 달릴까요?`,
     options: [
       {
@@ -945,13 +945,12 @@ var BB_DEMO = [
         bb: { kind: `fly`, phi: 8, D: 84, T: 4 },
         orders: [{ t: 0.2, id: `runner-3`, base: 4 }],
         expect: { runs: 0, outs: 2 },
-        explain: `잡히기 전에 출발해 3루를 다시 밟지 않았으니 득점 취소, 주자도 아웃이에요.`,
+        explain: `잡히기 전에 출발해 3루를 다시 밟지 않았으니 득점이 인정되지 않고 아웃이에요.`,
       },
     ],
   },
   {
     side: `basic`,
-    defense: !0,
     title: `파울 뜬공도 아웃`,
     bases: [!1, !1, !1],
     outs: 0,
@@ -3554,7 +3553,8 @@ function DemoPanel({ demo, onPick, onRetry, onNext, onList }) {
   if (!demo) return null;
   let c = demo.c,
     occ = [1, 2, 3].filter((b) => c.bases[b - 1]),
-    sit = `${c.outs ? `${c.outs}사` : `무사`} ${occ.length ? `${occ.join('·')}루` : `주자 없음`} · ${c.side === `def` || c.defense ? `상대 타자` : `타자`}: ${c.batter}`,
+    // 기초 카드는 상황만 (타자 정보는 규칙과 상관없음)
+    sit = `${c.outs ? `${c.outs}사` : `무사`} ${occ.length ? `${occ.join('·')}루` : `주자 없음`}${c.side === `basic` ? `` : ` · ${c.side === `def` ? `상대 타자` : `타자`}: ${c.batter}`}`,
     op = demo.pick != null ? c.options[demo.pick] : null,
     head = (0, S.jsxs)(`div`, {
       className: `top`,
