@@ -368,6 +368,8 @@ var BB_SIM = (() => {
         f.goal = lerp(f, ev.p, 0.3); // 다른 외야수는 백업
       }
     ev.errBy && ev.errBy !== ev.key && (P.f[ev.errBy].goal = { ...ev.missP });
+    // 외야로 간 타구: 2루를 맡지 않은 유격수·2루수가 중계하러 외야수와 2루 사이로 나감 (DEMO는 그대로)
+    !st.demo && OF.includes(ev.key) && (P.f[P.cover[2] === `inf-ss` ? `inf-2b` : `inf-ss`].goal = lerp(BB_BASES[2], ev.p, 0.35));
 
     // ── 주자 출발 ──
     let two = st.outs === 2;
@@ -408,7 +410,7 @@ var BB_SIM = (() => {
         if (b.mode === `track`) return Math.max(P.ev ? P.ev.ready - P.t : 9, 0) + (P.ev ? thrT(P.ev.p, k) : 9);
         if (b.mode === `held`) return P.holderBase === k ? 0 : Math.max(0, P.readyAt - P.t) + thrT(P.f[P.holder], k);
         let rem = Math.max(0, b.t1 - P.t);
-        return b.toBase === k ? rem : rem + 0.45 + thrT(BB_BASES[b.toBase], k);
+        return b.toBase === k ? rem : rem + 0.45 + thrT(b.toBase == null ? b.to : BB_BASES[b.toBase], k); // toBase 없음 = 중계 선수에게
       },
       runnerTime = (r, k) => r.delay + (Math.abs(k - r.s) * 1) / speed(r) + (Math.sign(k - r.s) !== Math.sign(r.target - r.s) && r.state === `run` ? 0.3 : 0),
       idx = (r) => P.r.indexOf(r),
@@ -473,11 +475,54 @@ var BB_SIM = (() => {
         // 송구가 다른 곳으로 가면 그 틈에 진루할 수 있는지 다시 판단
         for (let r of P.r) live(r) && r.state === `safe` && decide(r);
       },
+      // 외야 → 베이스 k 중계: 내야수가 외야수와 베이스 사이(베이스에서 40% 지점)에서 받음.
+      // 홈은 왼쪽이면 3루수, 아니면 1루수 / 2·3루는 2루를 맡지 않은 유격수·2루수. 비운 베이스는 투수가 커버
+      cutTo = (k) => {
+        let h = P.f[P.holder],
+          from = { x: h.x, y: h.y },
+          to = lerp(BB_BASES[k], from, 0.4),
+          key = k === 4 ? (h.x < -15 ? `inf-3b` : `inf-1b`) : P.cover[2] === `inf-ss` ? `inf-2b` : `inf-ss`;
+        for (let j = 1; j <= 3; j++) P.cover[j] === key && ((P.cover[j] = `pitcher`), (P.f.pitcher.goal = { ...BB_BASES[j] }));
+        ((P.ball = { mode: `thrown`, from, to, t0: P.t, t1: P.t + dist(from, to) / c.thr, toBase: null, receiver: key, by: P.holder, x: from.x, y: from.y, h: 1.5 }),
+          (P.holderBase = null),
+          P.throws++,
+          (P.f[key].goal = { ...to }));
+        for (let r of P.r) live(r) && r.state === `safe` && decide(r);
+      },
+      // 외야수의 송구 (DEMO 제외): 접전이면 그 베이스로, 아니면 맨 뒤 주자가 노릴 다음 베이스로 던져 묶음.
+      // 45m 넘으면 중계 선수를 거침 → 중계 선수가 받아서 다시 판단(이어 던지거나 끊고 다른 베이스로)
+      ofDefense = () => {
+        let h = P.f[P.holder],
+          via = (k) => dist(h, BB_BASES[k]) > 45,
+          tOf = (k) => (via(k) ? dist(h, BB_BASES[k]) / c.thr + 0.3 : thrT(h, k)),
+          best = null;
+        for (let r of P.r) {
+          if (!live(r) || r.delay > 0.5 || r.state !== `run` || r.target < 1) continue;
+          let k = r.target,
+            tt = tOf(k),
+            rt = runnerTime(r, k);
+          // 중계를 거치면 조금(0.3초) 늦어도 승부 (늦으면 중계 선수가 끊음)
+          if (tt + 0.05 < rt || (via(k) && tt < rt + 0.3)) {
+            let twoOut = P.st.outs + P.outs.length === 2,
+              score = (twoOut ? 0 : k * 10) + (isForce(r, k) ? 5 : 0) + (rt - tt) * (twoOut ? 10 : 1);
+            (!best || score > best.score) && (best = { k, score });
+          }
+        }
+        let k = best && best.k;
+        if (!k) {
+          if (!P.r.some((r) => live(r) && r.state === `run` && r.target > r.s)) return !1;
+          let tr = P.r.filter(live).pop(),
+            b = tr.state === `run` && tr.target > tr.s ? tr.target : Math.floor(tr.s + 1e-6);
+          k = Math.min(4, b + 1);
+        }
+        return (via(k) ? cutTo(k) : throwTo(k), !0);
+      },
       // 수비 판단: 공을 가진 선수가 아웃시킬 수 있는 주자에게 송구
       defense = () => {
         if (P.throws >= 6) return !1;
         let ft = P.st.firstThrow;
         if (ft && !P.throws) return (throwTo(ft.base, ft.carry), !0); // DEMO: 정해진 첫 송구
+        if (!P.st.demo && P.holder.startsWith(`out`)) return ofDefense();
         let h = P.f[P.holder],
           best = null;
         for (let r of P.r) {
@@ -547,7 +592,7 @@ var BB_SIM = (() => {
           k = b.toBase,
           rec = P.f[b.receiver];
         ((rec.x = b.to.x), (rec.y = b.to.y), (rec.goal = null));
-        ((P.ball = { mode: `held`, x: b.to.x, y: b.to.y, h: 1.2 }), (P.holder = b.receiver), (P.holderBase = k), (P.readyAt = P.t + 0.45));
+        ((P.ball = { mode: `held`, x: b.to.x, y: b.to.y, h: 1.2 }), (P.holder = b.receiver), (P.holderBase = k), (P.readyAt = P.t + (k == null ? 0.3 : 0.45))); // 중계 선수는 바로 몸을 돌려 던짐
         P.assistBy = b.by; // 이 베이스에서 나오는 아웃은 송구한 선수의 보살
         for (let r of P.r) {
           if (!live(r) || r.state !== `run` || r.target !== k) continue;
