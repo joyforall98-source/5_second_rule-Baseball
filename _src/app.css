@@ -47,21 +47,37 @@
 .bb-demo-list .bb-btn{font-size:12.5px;padding:8px 10px;text-align:left}
 @media (max-width:640px){.bb-demo-list{grid-template-columns:1fr}}
 .bb-demo-head{font-size:13px;color:#bbb;margin:2px 0 4px;text-align:left}
-.bb-demo{position:absolute;left:50%;top:10px;transform:translateX(-50%);width:min(430px,92%);z-index:30;background:#000000e6;border:1px solid #3498db;
-  border-radius:10px;padding:12px 14px;color:#eee;font-size:13.5px;line-height:1.55;text-align:left}
-.bb-demo h3{margin:0 0 2px;font-size:15px;color:#5dade2}
-.bb-demo .sit{color:#bbb;font-size:12.5px}
-.bb-demo .rule{margin:6px 0 0;padding:6px 8px;border-radius:6px;background:#27ae6026;border:1px solid #27ae6066;color:#d5f5e3;font-size:12.5px}
-.bb-demo .ask{margin:6px 0 8px;font-weight:800}
-.bb-demo .opts{display:flex;flex-direction:column;gap:6px}
-.bb-demo button{cursor:pointer;border:none;border-radius:6px;padding:8px 10px;font:inherit;font-weight:800;color:#fff;background:#2c3e50;text-align:left}
+/* DEMO 안내판: 경기장 아래(조작 버튼 자리)에 넓게, 큰 글씨 */
+.bb-demo{width:min(850px,100%);margin:12px auto 0;box-sizing:border-box;background:#0b1622;border:2px solid #3498db;border-radius:12px;
+  padding:16px 20px;color:#f2f2f2;font-size:17px;line-height:1.6;text-align:left}
+.bb-demo .top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.bb-demo h3{margin:0;font-size:21px;color:#5dade2}
+.bb-demo .top .list{flex:none;padding:6px 12px;font-size:14px;background:#34495e}
+.bb-demo .sit{margin-top:4px;color:#c9d1d9;font-size:16px}
+.bb-demo .rule{margin:10px 0 0;padding:10px 14px;border-radius:8px;background:#27ae6026;border:1px solid #27ae6080;color:#e3f9ec;font-size:16.5px}
+.bb-demo .ask{margin:12px 0 10px;font-size:20px;font-weight:900;color:#fff}
+.bb-demo .opts{display:grid;gap:8px}
+.bb-demo button{cursor:pointer;border:none;border-radius:8px;padding:12px 16px;font:inherit;font-size:18px;font-weight:800;color:#fff;background:#2c3e50;text-align:left}
 .bb-demo button:hover{background:#2980b9}
-.bb-demo .note{margin-top:8px;font-size:11.5px;color:#999}
-.bb-demo .verdict{font-size:17px;font-weight:900;margin:2px 0}
+.bb-demo .note{margin-top:10px;font-size:14px;color:#9aa4ad}
+.bb-demo .verdict{margin:8px 0 2px;font-size:26px;font-weight:900}
 .bb-demo .verdict.good{color:#2ecc71}
 .bb-demo .verdict.bad{color:#f39c12}
-.bb-demo .row{display:flex;gap:6px;margin-top:10px}
+.bb-demo .explain{font-size:19px;font-weight:700}
+.bb-demo .row{display:flex;gap:8px;margin-top:14px}
 .bb-demo .row button{flex:1;text-align:center}
+/* (.bb-root는 인라인 스타일로 padding·overflow가 정해져 있어 !important) 1240px 이상: 안내판을 오른쪽에 고정하고 경기장을 그만큼 왼쪽으로 → 스크롤 없이 함께 보임.
+   1700px 이상(프로젝터 등)은 경기장을 가운데 그대로 두고 오른쪽 빈 공간을 씀. 더 좁으면 경기장 아래 + 스크롤 */
+@media (min-width:1240px){
+  .bb-root:has(.bb-demo){padding-right:400px!important;box-sizing:border-box}
+  .bb-demo{position:fixed;top:50%;right:16px;transform:translateY(-50%);width:380px;margin:0;max-height:94vh;overflow:auto;z-index:40}
+}
+@media (min-width:1700px){
+  .bb-root:has(.bb-demo){padding-right:12px!important}
+  .bb-demo{right:24px;width:calc((100vw - 900px) / 2);max-width:560px}
+}
+@media (max-width:1239px){body:has(.bb-demo){overflow:auto}.bb-root:has(.bb-demo){overflow:visible!important}}
+@media (max-width:640px){.bb-demo{font-size:15px;padding:12px}.bb-demo .ask{font-size:17px}.bb-demo button{font-size:16px}.bb-demo .explain{font-size:16px}}
 .bb-tga-intro-outro{margin:8px 0 0;text-align:center;font-weight:800;color:#f1c40f}
 .bb-runalert{border-color:#e67e22;animation:bbWarn .5s ease-in-out infinite alternate}
 .bb-runalert .bb-pitchprompt-title{color:#f39c12}

@@ -626,13 +626,68 @@ function b() {
         S(() => (re(), done()), 900);
       }, 30);
     },
+    // 낫아웃: 3스트라이크를 포수가 놓치면 타자가 1루로 뜀. 포수가 공을 주워 1루로 던지기 전에 닿으면 세이프.
+    // 누상 주자는 그 틈에 한 베이스씩 진루
+    dropped3 = (kind, done) => {
+      let e = o.current,
+        ball = t.current,
+        cat = i.current.catcher,
+        bat = a.current[`runner-t`],
+        from = bbPx(BB_FIELD_M.catcher),
+        roll = bbRand(5, 16), // 공이 굴러간 거리(m)
+        spot = { x: bbRand(-8, 8), y: -1.2 - roll },
+        sp = bbPx(spot),
+        first = v[1],
+        pickT = 0.4 + roll / 6, // 포수가 공에 닿는 시각(초)
+        throwT = Math.hypot(spot.x - BB_BASES[1].x, spot.y - BB_BASES[1].y) / 21,
+        catT = pickT + 0.5 + throwT, // 공이 1루에 닿는 시각
+        batT = 0.6 + 27.43 / 7.3, // 타자가 1루에 닿는 시각
+        safe = batT < catT,
+        end = Math.min(catT, batT) + 0.3,
+        occ = [3, 2, 1].filter((b) => e.baseStatus[b - 1]),
+        mix = (p, q, k) => ({ bottom: p.bottom + (q.bottom - p.bottom) * k, left: p.left + (q.left - p.left) * k }),
+        put = (el, q) => el && ((el.style.bottom = q.bottom + `px`), (el.style.left = q.left + `%`)),
+        tt = 0;
+      ((e.fieldView = `top-down-view`),
+        (e.statusText = `낫아웃! 포수가 공을 놓쳤다 · 타자 1루로!`),
+        E(`낫아웃!`, `#e67e22`),
+        ie(),
+        bat && ((bat.style.display = `flex`), put(bat, v[0])),
+        ball && ((ball.style.display = `block`), (ball.style.transform = `translateX(-50%) translateZ(4px) rotateX(-90deg)`)),
+        T());
+      d.current = setInterval(() => {
+        if (e.paused) return;
+        tt += 0.03 * 1.6; // 1.6배속
+        let k = Math.min(1, tt / end);
+        // 공: 뒤로 굴러감 → 포수가 주워 1루로 송구
+        put(ball, tt < pickT + 0.5 ? mix(from, sp, Math.min(1, tt / 0.7)) : mix(sp, first, Math.min(1, (tt - pickT - 0.5) / throwT)));
+        put(cat, mix(from, sp, Math.min(1, tt / pickT)));
+        put(bat, mix(v[0], first, Math.min(1, Math.max(0, tt - 0.6) / (batT - 0.6))));
+        for (let b of occ) put(a.current[`runner-${b}`], mix(v[b], v[b + 1], k));
+        if (tt < end) return;
+        d.current &&= (clearInterval(d.current), null);
+        let bs = e.baseStatus,
+          runs = +!!bs[2];
+        ((e.baseStatus = [safe, bs[0], bs[1]]),
+          (e.totalScore += runs),
+          (e.strikes = 0),
+          (e.balls = 0),
+          safe || e.outs++,
+          E(safe ? `낫아웃 출루!` : bbOut(`낫아웃 송구 아웃`), safe ? `#2ecc71` : `#c0392b`),
+          (e.statusText = safe ? `낫아웃으로 1루 세이프${runs ? ` · 1점 득점` : ``}` : `삼진 · 포수가 1루로 던져 아웃`),
+          e.hitLog.push({ batter: e.batterNumber, team: e.bat, hitType: safe ? `삼진 (낫아웃 출루)` : `삼진 (낫아웃 송구 아웃)`, rbis: 0, scoreAfter: e.totalScore, time: Date.now() }),
+          l(),
+          T());
+        S(() => (re(), done()), 1000);
+      }, 30);
+    },
     fe = () => {
       let e = o.current,
         P = e.pitch,
         // 몸에 맞는 공: 타자 쪽(우타는 -x)으로 크게 빠진 공을 치지 않으면 가끔
         hbp = !e.swingMiss && P && P.zx * (e.lineup[e.batterNumber - 1] === `R` ? -1 : 1) > 1.55 && P.zy > -1.3 && Math.random() < 0.08,
-        // 폭투(땅에 박히는 낮은 공) · 포일(그 밖에 드물게): 주자가 있을 때
-        wild = !hbp && P && e.baseStatus.some(Boolean) ? (P.zy < -1.4 ? Math.random() < 0.15 && `폭투` : Math.random() < 0.004 && `포일`) : !1;
+        // 포수가 공을 놓침: 땅에 박히는 낮은 공은 폭투, 그 밖에 드물게 포일
+        wild = !hbp && P ? (P.zy < -1.4 ? Math.random() < 0.15 && `폭투` : Math.random() < 0.004 && `포일`) : !1;
       (e.swingMiss || bvRef.current.rig?.batter(`take`),
         (e.stealWindow = !1),
         (e.isSwung = !0),
@@ -651,8 +706,13 @@ function b() {
         hbp && ((e.hbp = !0), (e.balls = 4), (e.swingFeedback = { text: `몸에 맞는 공`, color: `#e67e22` })),
         (e.fieldView = `catcher-view`),
         T());
-      // 폭투·포일은 볼넷·삼진이 아닐 때만 (낫아웃은 다루지 않음)
-      wild && e.balls < 4 && e.strikes < 3 ? wildPitch(wild, () => oe() || S(ae, 1200)) : oe() || S(ae, 1200);
+      let go = () => oe() || S(ae, 1200);
+      // 3스트라이크를 놓치면 낫아웃(1루가 비었거나 2아웃일 때만 타자가 뜀), 그 밖에는 주자가 있을 때 폭투·포일
+      wild && e.strikes >= 3 && (!e.baseStatus[0] || e.outs === 2)
+        ? dropped3(wild, go)
+        : wild && e.balls < 4 && e.strikes < 3 && e.baseStatus.some(Boolean)
+          ? wildPitch(wild, go)
+          : go();
     },
     pe = (0, _.useCallback)(() => {
       let e = o.current,
@@ -1736,14 +1796,33 @@ function RunCtl({ ctl, onCmd }) {
 }
 // DEMO MODE 안내판: 상황·질문·선택지 → (플레이 재생) → 결과와 한 줄 해설
 function DemoPanel({ demo, onPick, onRetry, onNext, onList }) {
-  if (!demo || demo.phase === `play`) return null;
+  let ref = (0, _.useRef)(null),
+    phase = demo?.phase;
+  // 좁은 화면(안내판이 경기장 아래)일 때: 질문·결과는 안내판으로, 플레이 재생은 경기장으로 스크롤
+  (0, _.useEffect)(() => {
+    let el = ref.current;
+    if (!el || getComputedStyle(el).position === `fixed`) return;
+    phase === `play` ? window.scrollTo({ top: 0, behavior: `smooth` }) : el.scrollIntoView({ behavior: `smooth`, block: `nearest` });
+  }, [phase, demo?.ci]);
+  if (!demo) return null;
   let c = demo.c,
     occ = [1, 2, 3].filter((b) => c.bases[b - 1]),
     sit = `${c.outs ? `${c.outs}사` : `무사`} ${occ.length ? `${occ.join('·')}루` : `주자 없음`} · ${c.side === `def` ? `상대 타자` : `타자`}: ${c.batter}`,
     op = demo.pick != null ? c.options[demo.pick] : null,
-    head = (0, S.jsx)(`h3`, { children: `${bbDemoName(demo.ci)} · ${c.title}` });
+    head = (0, S.jsxs)(`div`, {
+      className: `top`,
+      children: [(0, S.jsx)(`h3`, { children: `${bbDemoName(demo.ci)} · ${c.title}` }), (0, S.jsx)(`button`, { className: `list`, onClick: onList, children: `☰ 목록` })],
+    });
+  // 플레이 재생 중: 고른 작전만 크게
+  if (demo.phase === `play`)
+    return (0, S.jsxs)(`div`, {
+      ref,
+      className: `bb-demo`,
+      children: [head, (0, S.jsx)(`div`, { className: `ask`, children: `▶ ${op.label}` }), (0, S.jsx)(`div`, { className: `sit`, children: `경기장에서 결과를 지켜보세요…` })],
+    });
   return demo.phase === `ask`
     ? (0, S.jsxs)(`div`, {
+        ref,
         className: `bb-demo`,
         children: [
           head,
@@ -1755,6 +1834,7 @@ function DemoPanel({ demo, onPick, onRetry, onNext, onList }) {
         ],
       })
     : (0, S.jsxs)(`div`, {
+        ref,
         className: `bb-demo`,
         children: [
           head,
@@ -1765,7 +1845,6 @@ function DemoPanel({ demo, onPick, onRetry, onNext, onList }) {
             children: [
               (0, S.jsx)(`button`, { onClick: onRetry, children: `↺ 다시 해보기` }),
               (0, S.jsx)(`button`, { onClick: onNext, children: `다음 상황 ▶` }),
-              (0, S.jsx)(`button`, { onClick: onList, children: `목록` }),
             ],
           }),
         ],
@@ -1832,6 +1911,7 @@ var HOWTO = [
   [`DEMO`, `상황 카드로 기초 규칙·공격·수비 전략 배우기`],
   [`사사구`, `볼넷·몸에 맞는 공 → 타자 1루`],
   [`폭투·포일`, `공이 뒤로 빠지면 주자 한 베이스씩`],
+  [`낫아웃`, `3스트라이크를 포수가 놓치면 타자가 1루로 (1루가 비었거나 2아웃)`],
 ];
 function HowTo() {
   return (0, S.jsx)(`div`, {
@@ -2338,13 +2418,6 @@ function ce() {
                 onAim: n.pickPitch,
               }),
               (0, S.jsx)(RunnerAlert, { alert: t.paused ? null : t.runAlert, onGo: n.runnerGo }),
-              (0, S.jsx)(DemoPanel, {
-                demo: t.paused ? null : t.demo,
-                onPick: n.demoPick,
-                onRetry: () => n.startDemo(t.demo.ci, t.demo.vi),
-                onNext: () => n.startDemo((t.demo.ci + 1) % BB_DEMO.length),
-                onList: n.demoList,
-              }),
               (0, S.jsx)(PitchPrompt, {
                 show: t.awaitPitch && !t.paused && !t.gameOver,
                 sel: t.pitchSel,
@@ -2405,7 +2478,15 @@ function ce() {
           }),
         }),
       }),
-      (0, S.jsx)(D, {
+      t.demo
+        ? (0, S.jsx)(DemoPanel, {
+            demo: t.demo,
+            onPick: n.demoPick,
+            onRetry: () => n.startDemo(t.demo.ci, t.demo.vi),
+            onNext: () => n.startDemo((t.demo.ci + 1) % BB_DEMO.length),
+            onList: n.demoList,
+          })
+        : (0, S.jsx)(D, {
         playballDisabled: t.playballDisabled || t.gameOver,
         swingDisabled: t.swingDisabled || t.gameOver,
         paused: t.paused,
