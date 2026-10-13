@@ -3968,7 +3968,7 @@ function bbAlign(name) {
 // 상황 코칭 한 줄 (EASY): 공격할 때 지금 상황에서 기억할 기본 전략
 function bbTip(outs, bases, humanBat) {
   let [b1, b2, b3] = bases;
-  if (!humanBat) return b1 || b2 || b3 ? `주자가 있어요: 견제(⇧1~3)로 리드를 줄여 보세요` : `빈 곳 없이: 타자에 맞춰 수비 위치를 정해요`;
+  if (!humanBat) return b1 || b2 || b3 ? `주자가 있어요: 견제(⇧1~3)로 리드를 줄여 보세요` : `구종과 코스를 섞어 타자의 타이밍을 흔들어요`;
   if (outs === 2) return b1 || b2 || b3 ? `2아웃! 치면 주자는 바로 뛰어요` : `2아웃: 정확히 맞혀 출루부터 해요`;
   if (b3) return `3루 주자: 외야로 멀리 띄우면 희생플라이 (어퍼스윙)`;
   if (b1 && !b2) return `1루 주자: 땅볼이면 꼭 2루로! 번트로 진루시킬 수도 있어요`;
