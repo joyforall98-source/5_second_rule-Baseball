@@ -209,6 +209,8 @@ function b() {
       tbRunner: null, // 승부치기 2루 주자 타순
     }),
     s = () => ({ steal: o.current.difficulty === `HARD` ? { 1: 0.28, 2: 0.18, 3: 0.1 } : { 1: 0.55, 2: 0.45, 3: 0.3 } }),
+    // 주자의 리드 폭 (-1 짧게 · 0 보통 · 1 넓게). 넓으면 도루 성공↑ 견제 위험↑
+    lead = (b) => (o.current.leads || [])[b - 1] || 0,
     // 사람이 수비(투구)하는 차례인가: 2인 대결은 항상, 컴퓨터 대결은 컴퓨터가 공격할 때
     humanDef = () => o.current.mode === `2P` || o.current.bat === o.current.cpu,
     l = () => {
@@ -324,7 +326,9 @@ function b() {
     },
     ae = (0, _.useCallback)(() => {
       ne();
-      let e = o.current;
+      let e = o.current,
+        key = e.baseStatus.join();
+      e.leadKey !== key && ((e.leads = [0, 0, 0]), (e.leadKey = key));
       ((e.fieldView = `catcher-view`),
         (e.playballDisabled = humanDef()),
         (e.swingDisabled = !0),
@@ -474,7 +478,7 @@ function b() {
     // 플레이는 홈런 주자 홈인·중계 플레이까지 끝까지 보여준 뒤 다음 투구로
     pb = (bb) => {
       let e = o.current,
-        P = BB_SIM.start(bb, { bases: [...e.baseStatus], outs: e.outs, diff: e.difficulty, ...(e.mode === `DEMO` ? e.demoSim : e.align ? { fielders: bbAlign(e.align) } : null) }),
+        P = BB_SIM.start(bb, { bases: [...e.baseStatus], outs: e.outs, diff: e.difficulty, leads: e.mode === `DEMO` ? null : e.leads, ...(e.mode === `DEMO` ? e.demoSim : e.align ? { fielders: bbAlign(e.align) } : null) }),
         ball = t.current,
         shadow = i.current.__shadow,
         SPEED = 2,
@@ -716,10 +720,11 @@ function b() {
           ? wildPitch(wild, go)
           : go();
     },
-    pe = (0, _.useCallback)(() => {
+    pe = (0, _.useCallback)((cpu) => {
       let e = o.current,
         P = e.pitch;
-      if (!e.isPitched || e.isSwung || e.swingDisabled || e.gameOver || !P) return;
+      // cpu === true: 컴퓨터 타자의 스윙. 그 밖(키·버튼·화면 클릭)은 사람 타자만
+      if (!e.isPitched || e.isSwung || (e.swingDisabled && cpu !== !0) || e.gameOver || !P) return;
       ((e.isSwung = !0), (e.swingDisabled = !0), (e.stealWindow = !1));
       let bv = bvRef.current;
       bv.rig?.batter(`swing`);
@@ -899,18 +904,21 @@ function b() {
         () => {
           let go = e.pickWarn?.go;
           ((e.pickWarn = null), (e.isPitched = !1));
-          go === `advance` ? rundown(b, done) : pickoff(b, done, go === `return` ? 0 : e.difficulty === `HARD` ? 0.3 : 0.15);
+          go === `advance` ? rundown(b, done) : pickoff(b, done, go === `return` ? 0 : (e.difficulty === `HARD` ? 0.3 : 0.15) + 0.12 * lead(b));
         },
-        e.difficulty === `HARD` ? 500 : 800,
+        (e.difficulty === `HARD` ? 500 : 800) - 150 * lead(b), // 리드가 넓으면 돌아갈 시간이 짧음
       );
     },
     A = (0, _.useCallback)(() => {
       let e = o.current;
       if (e.isPitched || e.gameOver) return;
       // 컴퓨터 수비: 주자가 있으면 가끔 견제. 끝나면 원래 투구를 그대로 던짐 (견제사로 3아웃이면 공수 교대)
-      if (!e.noPick && !humanDef() && e.baseStatus.some(Boolean) && Math.random() < 0.18) {
-        let occ = [1, 2, 3].filter((b) => e.baseStatus[b - 1]),
-          b = occ[0] === 1 && Math.random() < 0.75 ? 1 : occ[Math.floor(Math.random() * occ.length)]; // 대부분 1루
+      let occ = [1, 2, 3].filter((b) => e.baseStatus[b - 1]),
+        wide = occ.filter((b) => lead(b) > 0),
+        big = Math.max(-1, ...occ.map(lead));
+      if (!e.noPick && !humanDef() && occ.length && Math.random() < 0.18 * (1 + 0.6 * big)) {
+        // 리드를 넓게 잡은 주자에게 먼저, 아니면 대부분 1루
+        let b = wide.length ? wide[0] : occ[0] === 1 && Math.random() < 0.75 ? 1 : occ[Math.floor(Math.random() * occ.length)];
         return pickWarn(b, () => oe() || ((e.noPick = !0), A()));
       }
       e.noPick = !1;
@@ -933,7 +941,7 @@ function b() {
         (e.pitchType = P.isStrike ? `strike` : `ball`),
         T(),
         (e.windupTimer = S(() => {
-          ((e.windupTimer = null), (e.swingDisabled = !1));
+          ((e.windupTimer = null), (e.swingDisabled = e.bat === e.cpu)); // 컴퓨터가 타자면 사람 스윙 막음
           let bv = bvRef.current,
             last = performance.now(),
             // 스윙 가능한 마지막 시점이 지나면 판정
@@ -974,7 +982,7 @@ function b() {
                   bv.marker &&
                   (bv.marker.style.setProperty(`--k`, 1 + 2 * Math.max(0, 1 - P.elapsed / P.dur)),
                   bv.marker.classList.toggle(`go`, Math.abs(P.elapsed - P.dur) <= goWin)),
-                P.cpuSwing != null && P.elapsed >= P.cpuSwing && ((P.cpuSwing = null), pe()),
+                P.cpuSwing != null && P.elapsed >= P.cpuSwing && ((P.cpuSwing = null), pe(!0)),
                 u.current &&
                   P.elapsed >= endAt &&
                   ((u.current &&= (clearInterval(u.current), null)),
@@ -1052,7 +1060,7 @@ function b() {
           (n.swingDisabled = !0),
           (n.isSwung = !0),
           (u.current &&= (clearInterval(u.current), null)));
-        let c = Math.random() < s().steal[e],
+        let c = Math.random() < s().steal[e] + 0.12 * lead(e),
           early = !!n.windupTimer;
         n.windupTimer && (n.windupTimer.cancel(), (n.windupTimer = null));
         if (early && Math.random() < (n.difficulty === `HARD` ? 0.45 : 0.3))
@@ -1208,6 +1216,13 @@ function b() {
     let s = o.current;
     if (!s.difficulty || s.mode === `DEMO` || s.bat === s.cpu || s.isSwung || s.paused || s.gameOver) return;
     ((s.batPlan = s.batPlan === k ? null : k), T());
+  };
+  // 주자 리드 폭 조절 (사람이 공격할 때, 스윙 전까지)
+  let setLead = (b, d) => {
+    let s = o.current;
+    if (s.bat === s.cpu || !s.baseStatus[b - 1] || s.isSwung || s.paused || s.gameOver) return;
+    let l = [...(s.leads || [0, 0, 0])];
+    ((l[b - 1] = Math.max(-1, Math.min(1, l[b - 1] + d))), (s.leads = l), T());
   };
   // 2인 대결 수비 위치
   let setAlign = (k) => {
@@ -1414,6 +1429,7 @@ function b() {
       pitchSel: { type: j.pitchSel.type, zone: !!j.pitchSel.zone },
       picks: j.picks || 0,
       batPlan: j.batPlan,
+      leads: j.leads || [0, 0, 0],
       align: j.align,
       humanBat: j.bat !== j.cpu,
       tip:
@@ -1453,6 +1469,7 @@ function b() {
       runnerGo,
       setPlan,
       setAlign,
+      setLead,
       startDemo,
       demoPick,
       demoList,
@@ -1932,7 +1949,7 @@ var HOWTO = [
   [`타격 작전`, `1 밀어치기 · 2 당겨치기 · 3 번트 · 4 다운스윙 · 5 어퍼스윙`],
   [`투구 구종`, `1 직구 · 2 슬라이더 · 3 커브 · 4 체인지업`],
   [`투구 코스`, `존 클릭 · 또는 QWE/ASD/ZXC (⇧ 볼)`],
-  [`주루`, `→ 진루 · ← 귀루 · 🏃 도루`],
+  [`주루`, `→ 진루 · ← 귀루 · 주자를 눌러 도루·리드 폭`],
   [`견제 동작`, `← 빨리 귀루하면 세이프 · 스타트하면 런다운`],
   [`견제`, `수비 때 견제 버튼 · ⇧1–3 (타자당 2번)`],
   [`일시정지`, `Esc`],
@@ -1956,29 +1973,48 @@ var re = {
   2: { bottom: 260, left: `50%`, label: `2루→3루` },
   3: { bottom: 135, left: `calc(33% - 110px)`, label: `3루→홈` },
 };
-function ie({ baseStatus: e, canManualRunner: t, onAdvance: n, batView: bvw }) {
-  return (0, S.jsx)(S.Fragment, {
-    children: [1, 2, 3].map((r) => {
-      let i = e[r - 1],
-        a = r < 3 ? e[r] : !1,
-        o = t && i && (r === 3 || !a),
-        // 타격 시점에서는 좌·우 타석을 피해 오른쪽 위(점수판 아래)에 모아서 표시
-        s = bvw ? { bottom: 440 - (r - 1) * 40, left: `770px`, label: re[r].label } : re[r];
-      return (0, S.jsxs)(
-        `button`,
-        {
-          type: `button`,
-          className: `bb-field-steal-btn`,
-          style: { bottom: s.bottom + `px`, left: s.left },
-          disabled: !o,
-          onClick: () => n(r),
-          "aria-label": `${r}루 도루 시도`,
-          title: r === 3 ? `홈스틸` : `${r}루→${r + 1}루 도루`,
-          children: [`🏃 `, s.label],
-        },
-        r,
-      );
-    }),
+// 주자 다이아몬드 (타격 화면 왼쪽): 베이스 위 주자를 누르면 도루 · 리드 넓게 · 리드 짧게
+var BB_LEAD_TXT = { "-1": `짧게`, 0: `보통`, 1: `넓게` };
+function RunnerDiamond({ show, bases, leads, canSteal, onSteal, onLead }) {
+  let [open, setOpen] = (0, _.useState)(0);
+  if (!show) return null;
+  let sel = open && bases[open - 1] ? open : 0,
+    can = (b) => canSteal && bases[b - 1] && (b === 3 || !bases[b]);
+  return (0, S.jsxs)(`div`, {
+    className: `bb-rd`,
+    children: [
+      (0, S.jsx)(`div`, { className: `bb-rd-title`, children: `주자를 눌러 작전` }),
+      (0, S.jsxs)(`div`, {
+        className: `bb-rd-field`,
+        children: [
+          (0, S.jsx)(`i`, { className: `home` }),
+          ...[1, 2, 3].map((b) =>
+            (0, S.jsx)(
+              `button`,
+              {
+                className: `base b${b}${bases[b - 1] ? ` on` : ``}${sel === b ? ` sel` : ``}${can(b) ? ` go` : ``}`,
+                disabled: !bases[b - 1],
+                onClick: () => setOpen(sel === b ? 0 : b),
+                "aria-label": `${b}루 주자`,
+                children: bases[b - 1] ? `🏃${leads[b - 1] > 0 ? `»` : leads[b - 1] < 0 ? `«` : ``}` : ``,
+              },
+              b,
+            ),
+          ),
+        ],
+      }),
+      sel
+        ? (0, S.jsxs)(`div`, {
+            className: `bb-rd-menu`,
+            children: [
+              (0, S.jsx)(`b`, { children: `${sel}루 주자 · 리드 ${BB_LEAD_TXT[leads[sel - 1]]}` }),
+              (0, S.jsx)(`button`, { className: `steal`, disabled: !can(sel), onClick: () => (onSteal(sel), setOpen(0)), children: sel === 3 ? `🏃 홈스틸` : `🏃 도루 (${sel + 1}루)` }),
+              (0, S.jsx)(`button`, { disabled: leads[sel - 1] >= 1, onClick: () => onLead(sel, 1), children: `리드 넓게 (도루↑ 견제 위험↑)` }),
+              (0, S.jsx)(`button`, { disabled: leads[sel - 1] <= -1, onClick: () => onLead(sel, -1), children: `리드 짧게 (안전)` }),
+            ],
+          })
+        : null,
+    ],
   });
 }
 function ae({
@@ -2527,11 +2563,13 @@ function ce() {
                 tbRunner: t.tbRunner,
               }),
               (0, S.jsx)(RunCtl, { ctl: t.paused ? null : t.runCtl, onCmd: n.runCmd }),
-              (0, S.jsx)(ie, {
-                baseStatus: t.baseStatus,
-                canManualRunner: t.canManualRunner && !t.gameOver,
-                onAdvance: n.advanceRunner,
-                batView: t.fieldView === `catcher-view`,
+              (0, S.jsx)(RunnerDiamond, {
+                show: t.fieldView === `catcher-view` && t.humanBat && !t.paused && !t.gameOver && !t.demo && t.baseStatus.some(Boolean),
+                bases: t.baseStatus,
+                leads: t.leads,
+                canSteal: t.canManualRunner && !t.gameOver,
+                onSteal: n.advanceRunner,
+                onLead: n.setLead,
               }),
               (0, S.jsx)(te, {
                 text: t.result.text,

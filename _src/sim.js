@@ -189,6 +189,8 @@ var BB_SIM = (() => {
       scoredT: null,
     });
     for (let b of [3, 2, 1]) bases[b - 1] && P.r.push(mk(`runner-${b}`, b));
+    // 리드(st.leads[루-1] = -1 짧게 · 0 보통 · 1 넓게): 넓게 잡은 주자는 조금 앞에서 출발
+    for (let r of P.r) r.s += Math.max(0, (st.leads || [])[r.from - 1] || 0) * 0.06;
     let bat = mk(`runner-t`, 0);
     st.batRun && (bat.run = st.batRun);
     (P.r.push(bat), (P.bat = bat));
