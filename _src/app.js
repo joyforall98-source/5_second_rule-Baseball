@@ -213,7 +213,7 @@ function b() {
     humanDef = () => o.current.mode === `2P` || o.current.bat === o.current.cpu,
     l = () => {
       let e = o.current;
-      ((e.batterNumber = e.batterNumber >= 9 ? 1 : e.batterNumber + 1), (e.picks = 0));
+      ((e.batterNumber = e.batterNumber >= 9 ? 1 : e.batterNumber + 1), (e.picks = 0), (e.batPlan = null));
     },
     u = (0, _.useRef)(null),
     d = (0, _.useRef)(null),
@@ -405,7 +405,7 @@ function b() {
       let e = o.current;
       if (!e.halfBreak) return;
       ((e.halfBreak = null), e.half === `top` ? (e.half = `bottom`) : ((e.half = `top`), e.inning++), (e.bat = e.half === `top` ? 0 : 1), loadTeam());
-      ((e.outs = 0), (e.strikes = 0), (e.balls = 0), (e.baseStatus = [!1, !1, !1]), (e.tbRunner = null), (e.picks = 0));
+      ((e.outs = 0), (e.strikes = 0), (e.balls = 0), (e.baseStatus = [!1, !1, !1]), (e.tbRunner = null), (e.picks = 0), (e.batPlan = null), (e.align = null));
       // 승부치기: 직전 타순의 타자를 2루 주자로 두고 무사 2루에서 시작
       e.inning > e.innings && ((e.baseStatus = [!1, !0, !1]), (e.tbRunner = e.batterNumber === 1 ? 9 : e.batterNumber - 1));
       (re(), ae());
@@ -421,7 +421,8 @@ function b() {
     },
     oe = (0, _.useCallback)(() => {
       let e = o.current;
-      let kWhy = e.swingMiss ? `헛스윙 삼진` : `루킹 삼진`;
+      let kWhy = e.buntK ? `스리번트 파울 삼진` : e.swingMiss ? `헛스윙 삼진` : `루킹 삼진`;
+      e.buntK = !1;
       if (e.strikes >= 3)
         (e.outs++,
           (e.strikes = 0),
@@ -473,7 +474,7 @@ function b() {
     // 플레이는 홈런 주자 홈인·중계 플레이까지 끝까지 보여준 뒤 다음 투구로
     pb = (bb) => {
       let e = o.current,
-        P = BB_SIM.start(bb, { bases: [...e.baseStatus], outs: e.outs, diff: e.difficulty, ...(e.mode === `DEMO` ? e.demoSim : null) }),
+        P = BB_SIM.start(bb, { bases: [...e.baseStatus], outs: e.outs, diff: e.difficulty, ...(e.mode === `DEMO` ? e.demoSim : e.align ? { fielders: bbAlign(e.align) } : null) }),
         ball = t.current,
         shadow = i.current.__shadow,
         SPEED = 2,
@@ -522,7 +523,7 @@ function b() {
           e.play = null;
           for (let id of [`runner-t`, `runner-1`, `runner-2`, `runner-3`]) a.current[id]?.classList.remove(`manual`);
           if (sim.foul && !sim.foulOut) {
-            (e.strikes < 2 && e.strikes++, E(`FOUL`, `#e67e22`), (e.statusText = `파울!`), T());
+            (bb.bunt && e.strikes === 2 && ((e.strikes = 3), (e.buntK = !0)), e.strikes < 2 && e.strikes++, E(`FOUL`, `#e67e22`), (e.statusText = `파울!`), T());
             if (e.mode === `DEMO`) return void S(() => ((e.demo.phase = `result`), T()), 1200);
             next(700);
             return;
@@ -564,7 +565,7 @@ function b() {
           ? `파울 타구`
           : P.homeRun
             ? `큰 타구! 넘어가나…`
-            : `${{ ground: `땅볼`, line: `직선타`, fly: `뜬공`, pop: `뜬공` }[bb.kind]}!${e.mode === `DEMO` ? `` : ` → 진루 / ← 귀루`}`),
+            : `${bb.bunt ? `번트` : { ground: `땅볼`, line: `직선타`, fly: `뜬공`, pop: `뜬공` }[bb.kind]}!${e.mode === `DEMO` ? `` : ` → 진루 / ← 귀루`}`),
         (e.distanceText = `-`),
         te(),
         ball && ((ball.style.display = `block`), (ball.style.width = ball.style.height = `8px`)),
@@ -722,7 +723,9 @@ function b() {
       ((e.isSwung = !0), (e.swingDisabled = !0), (e.stealWindow = !1));
       let bv = bvRef.current;
       bv.rig?.batter(`swing`);
-      let win = bbSwingWindow(e.difficulty),
+      let plan = e.bat !== e.cpu ? e.batPlan : null, // 사람 타자의 타격 작전
+        pl = BB_PLAN[plan] || { win: 1, q: 0, lat: 0 },
+        win = bbSwingWindow(e.difficulty) * pl.win,
         dt = P.elapsed - P.dur, // 음수 = 빠름, 양수 = 늦음 (ms)
         adt = Math.abs(dt),
         off = Math.max(Math.abs(P.zx), Math.abs(P.zy)); // 1 초과면 존 밖
@@ -748,10 +751,11 @@ function b() {
         off > 1 && (q *= 0.5),
         e.mode === `TGA` && e.bat !== e.cpu && (q += BB_TGA[e.difficulty].boost), // TGA: 내 타구 질 보정
         e.mode === `TGA` && e.difficulty === `EASY` && e.bat !== e.cpu && adt <= win * BB_HINT_WIN && (q += BB_HINT_BONUS),
+        (q += pl.q),
         (q = Math.max(0, Math.min(1, q + (Math.random() - 0.5) * 0.16))));
       // 빠르면 당겨침: 좌타자는 우측(+), 우타자는 좌측(-)
       let pull = e.lineup[e.batterNumber - 1] === `R` ? -1 : 1,
-        lat = pull * (-dt / win) * 22 + (Math.random() - 0.5) * 8;
+        lat = pull * (-dt / win) * 22 + (Math.random() - 0.5) * 8 + pull * pl.lat;
       ((e.swingFeedback =
         adt <= win * 0.18
           ? { text: `PERFECT!`, color: `#f1c40f` }
@@ -773,7 +777,7 @@ function b() {
           (bv.ball && (bv.ball.style.display = `none`),
             bv.marker && (bv.marker.style.display = `none`));
           // 방향: lat ±16 → 파울라인 ±45°. 타구 종류·비거리·수비 결과는 sim.js가 결정
-          pb(BB_SIM.batted(q, (lat * 45) / 16, q < 0.12 || Math.abs(lat) > 16));
+          pb(plan === `bunt` ? BB_SIM.bunt(off > 1 || Math.random() < 0.25) : BB_SIM.batted(q, (lat * 45) / 16, q < 0.12 || Math.abs(lat) > 16, plan));
         }, 450));
     }, [S, T]),
     // 견제: b루로 던져 견제사 또는 세이프. 끝나면 done(out)
@@ -1021,6 +1025,8 @@ function b() {
         (e.difficulty = null),
         (e.demo = null),
         (e.demoSim = null),
+        (e.batPlan = null),
+        (e.align = null),
         (e.menuStep = null),
         (e.statusText = `난이도를 선택하고 플레이볼을 눌러주세요`),
         D(),
@@ -1197,6 +1203,17 @@ function b() {
     },
     [S, T, A],
   );
+  // 타격 작전 고르기 (사람이 공격할 때, 스윙 전까지). 같은 것을 다시 고르면 해제
+  let setPlan = (k) => {
+    let s = o.current;
+    if (!s.difficulty || s.mode === `DEMO` || s.bat === s.cpu || s.isSwung || s.paused || s.gameOver) return;
+    ((s.batPlan = s.batPlan === k ? null : k), T());
+  };
+  // 2인 대결 수비 위치
+  let setAlign = (k) => {
+    let s = o.current;
+    s.awaitPitch && ((s.align = k === `기본` ? null : k), T());
+  };
   // 견제 동작·런다운 중 주자 선택. 다음 루에 주자가 있으면 진루 불가, 견제 동작 땐 첫 선택만
   let runnerGo = (go) => {
     let s = o.current,
@@ -1227,6 +1244,8 @@ function b() {
           k = e.shiftKey ? 1.45 : 0.62;
         return (e.preventDefault(), pickPitch({ zone: e.shiftKey && !cx && !cy ? [0, 1.45] : [cx * k, cy * k] }));
       }
+      let pk = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4, Numpad1: 0, Numpad2: 1, Numpad3: 2, Numpad4: 3, Numpad5: 4 }[e.code];
+      if (pk != null && !s.awaitPitch) return (e.preventDefault(), setPlan(BB_PLAN_KEYS[pk]));
       if ((s.pickWarn || s.rundown) && (e.code === `ArrowRight` || e.code === `ArrowLeft`))
         return (e.preventDefault(), runnerGo(e.code === `ArrowRight` ? `advance` : `return`));
       // 주루 지시: → 전원 진루, ← 전원 귀루
@@ -1394,6 +1413,13 @@ function b() {
       awaitPitch: j.awaitPitch,
       pitchSel: { type: j.pitchSel.type, zone: !!j.pitchSel.zone },
       picks: j.picks || 0,
+      batPlan: j.batPlan,
+      align: j.align,
+      humanBat: j.bat !== j.cpu,
+      tip:
+        j.difficulty === `EASY` && j.mode !== `DEMO` && !j.isPitched && !j.gameOver && !j.halfBreak && !j.paused
+          ? bbTip(j.outs, j.baseStatus, j.bat !== j.cpu)
+          : null,
       demo: j.demo,
       menuStep: j.menuStep,
       runAlert: j.pickWarn ? { kind: `warn`, ...j.pickWarn } : j.rundown ? { kind: `rd`, ...j.rundown } : null,
@@ -1425,6 +1451,8 @@ function b() {
       pickPitch,
       pickBase,
       runnerGo,
+      setPlan,
+      setAlign,
       startDemo,
       demoPick,
       demoList,
@@ -1642,36 +1670,31 @@ function ee({
     ],
   });
 }
-function D({
-  playballDisabled: e,
-  swingDisabled: t,
-  paused: n,
-  gameOver: r,
-  onPlayball: i,
-  onSwing: a,
-  onPause: o,
-}) {
-  return (0, S.jsxs)(`div`, {
-    className: `bb-controls`,
+// 경기 화면 안 버튼: 오른쪽 위 플레이볼/일시정지(하나로), 오른쪽 아래 타격 작전 + 타격
+function GameButtons({ canPlay, paused, gameOver, swingDisabled, showPlan, plan, onPlan, onPlayball, onPause, onSwing }) {
+  return (0, S.jsxs)(S.Fragment, {
     children: [
       (0, S.jsx)(`button`, {
-        className: `bb-btn bb-btn-playball`,
-        onClick: i,
-        disabled: e,
-        children: `플레이볼`,
+        className: `bb-gbtn-main ${canPlay ? `play` : `pause`}`,
+        onClick: canPlay ? onPlayball : onPause,
+        disabled: !canPlay && (paused || gameOver),
+        children: canPlay ? `▶ 플레이볼 (Enter)` : `⏸ 일시정지 (Esc)`,
       }),
-      (0, S.jsx)(`button`, {
-        className: `bb-btn bb-btn-swing`,
-        onClick: a,
-        disabled: t,
-        children: `타격 (Space)`,
-      }),
-      (0, S.jsx)(`button`, {
-        className: `bb-btn bb-btn-pause`,
-        onClick: o,
-        disabled: r || n,
-        title: `일시정지 및 요약 보기`,
-        children: `⏸ 일시정지`,
+      (0, S.jsxs)(`div`, {
+        className: `bb-gbtn-br`,
+        children: [
+          showPlan &&
+            (0, S.jsxs)(`div`, {
+              className: `bb-plan`,
+              children: [
+                (0, S.jsx)(`b`, { children: `타격 작전` }),
+                ...BB_PLAN_KEYS.map((k, i) =>
+                  (0, S.jsx)(`button`, { className: plan === k ? `on` : ``, onClick: () => onPlan(k), children: `${i + 1} ${BB_PLAN[k].name}` }, k),
+                ),
+              ],
+            }),
+          (0, S.jsx)(`button`, { className: `bb-gbtn-swing`, onClick: onSwing, disabled: swingDisabled, children: [`타격`, (0, S.jsx)(`small`, { children: `Space` }, `k`)] }),
+        ],
       }),
     ],
   });
@@ -1874,7 +1897,7 @@ function RunnerAlert({ alert, onGo }) {
   });
 }
 // 수비 투구 선택: 구종 버튼 + 존 주변 클릭으로 도달 지점
-function PitchPrompt({ show, sel, defName, onPick, bases, picks, onPickoff }) {
+function PitchPrompt({ show, sel, defName, onPick, bases, picks, onPickoff, align, onAlign }) {
   return show
     ? (0, S.jsxs)(`div`, {
         className: `bb-pitchprompt`,
@@ -1886,6 +1909,12 @@ function PitchPrompt({ show, sel, defName, onPick, bases, picks, onPickoff }) {
               (0, S.jsx)(`button`, { className: sel.type === i + 1 ? `on` : ``, onClick: () => onPick({ type: i + 1 }), children: `${i + 1} ${name}` }, i),
             ),
           }),
+          // 2인 대결: 수비 위치
+          align &&
+            (0, S.jsx)(`div`, {
+              className: `bb-pitchprompt-types align`,
+              children: Object.keys(BB_ALIGN).map((k) => (0, S.jsx)(`button`, { className: align === k ? `on` : ``, onClick: () => onAlign(k), children: `수비 ${k}` }, k)),
+            }),
           bases.some(Boolean) &&
             picks < 2 &&
             (0, S.jsx)(`div`, {
@@ -1900,6 +1929,7 @@ function PitchPrompt({ show, sel, defName, onPick, bases, picks, onPickoff }) {
 var HOWTO = [
   [`타격`, `Space · 화면 터치`],
   [`투구 시작`, `Enter (컴퓨터 투구)`],
+  [`타격 작전`, `1 밀어치기 · 2 당겨치기 · 3 번트 · 4 다운스윙 · 5 어퍼스윙`],
   [`투구 구종`, `1 직구 · 2 슬라이더 · 3 커브 · 4 체인지업`],
   [`투구 코스`, `존 클릭 · 또는 QWE/ASD/ZXC (⇧ 볼)`],
   [`주루`, `→ 진루 · ← 귀루 · 🏃 도루`],
@@ -2120,6 +2150,39 @@ function ae({
       ],
     }),
   });
+}
+// 타격 작전 (사람 타자): win 타이밍 허용 배율, q 타구 질 보정, lat 방향(+는 당겨치는 쪽)
+// 시뮬레이션(타이밍 오차 45ms) 인플레이 타율: 없음 .325 · 밀어 .307(밀어친 방향 60%) · 당겨 .334(홈런 5.8%)
+// · 번트 1루 주자 진루 93% · 다운 .298(땅볼 58%, 홈런 거의 없음) · 어퍼 .306(뜬공 58%, 홈런 5.4%, 헛스윙↑)
+var BB_PLAN = {
+    push: { name: `밀어치기`, win: 0.95, q: -0.03, lat: -7 },
+    pull: { name: `당겨치기`, win: 0.95, q: -0.01, lat: 7 },
+    bunt: { name: `번트`, win: 1.8, q: 0, lat: 0 },
+    down: { name: `다운스윙`, win: 1, q: -0.08, lat: 0 },
+    up: { name: `어퍼스윙`, win: 0.8, q: -0.02, lat: 0 },
+  },
+  BB_PLAN_KEYS = [`push`, `pull`, `bunt`, `down`, `up`],
+  // 수비 위치 (2인 대결의 수비 플레이어): [내야 x, 내야 y, 외야 x, 외야 y] 이동(m). x는 1루 쪽이 +
+  BB_ALIGN = { 기본: [0, 0, 0, 0], 왼쪽: [-6, 0, -10, 0], 오른쪽: [6, 0, 10, 0], 전진: [0, -5, 0, -12], 후진: [0, 4, 0, 10] };
+function bbAlign(name) {
+  let [ix, iy, ox, oy] = BB_ALIGN[name] || BB_ALIGN.기본,
+    f = {};
+  for (let k in BB_FIELD_M) {
+    let m = BB_FIELD_M[k],
+      inf = k.startsWith(`inf`);
+    (inf || k.startsWith(`out`)) && (f[k] = { x: m.x + (inf ? ix : ox), y: m.y + (inf ? iy : oy) });
+  }
+  return f;
+}
+// 상황 코칭 한 줄 (EASY): 공격할 때 지금 상황에서 기억할 기본 전략
+function bbTip(outs, bases, humanBat) {
+  let [b1, b2, b3] = bases;
+  if (!humanBat) return b1 || b2 || b3 ? `주자가 있어요: 견제(⇧1~3)로 리드를 줄여 보세요` : `빈 곳 없이: 타자에 맞춰 수비 위치를 정해요`;
+  if (outs === 2) return b1 || b2 || b3 ? `2아웃! 치면 주자는 바로 뛰어요` : `2아웃: 정확히 맞혀 출루부터 해요`;
+  if (b3) return `3루 주자: 외야로 멀리 띄우면 희생플라이 (어퍼스윙)`;
+  if (b1 && !b2) return `1루 주자: 땅볼이면 꼭 2루로! 번트로 진루시킬 수도 있어요`;
+  if (b2) return `2루 주자: 짧은 안타엔 3루에서 멈추는 것도 좋아요`;
+  return `수비가 몰린 반대쪽 빈 곳으로 보내 봐요 (밀어치기·당겨치기)`;
 }
 // TGA 난이도 설명 (경기 시작 전 화면). 규칙 두 줄과 맺음말은 모든 난이도 공통
 var TGA_INFO = {
@@ -2420,6 +2483,21 @@ function ce() {
                 onAim: n.pickPitch,
               }),
               (0, S.jsx)(RunnerAlert, { alert: t.paused ? null : t.runAlert, onGo: n.runnerGo }),
+              t.tip && (0, S.jsx)(`div`, { className: `bb-tip`, children: `💡 ${t.tip}` }),
+              !t.demo &&
+                t.difficulty &&
+                (0, S.jsx)(GameButtons, {
+                  canPlay: !t.playballDisabled && !t.gameOver && !t.paused,
+                  paused: t.paused,
+                  gameOver: t.gameOver,
+                  swingDisabled: t.swingDisabled || t.gameOver,
+                  showPlan: t.humanBat && !t.gameOver, // 2인 대결: 상대가 투구를 고르는 동안에도 마우스로 (숫자 키는 투수 몫)
+                  plan: t.batPlan,
+                  onPlan: n.setPlan,
+                  onPlayball: n.playball,
+                  onPause: n.pauseGame,
+                  onSwing: n.swing,
+                }),
               (0, S.jsx)(PitchPrompt, {
                 show: t.awaitPitch && !t.paused && !t.gameOver,
                 sel: t.pitchSel,
@@ -2428,6 +2506,8 @@ function ce() {
                 bases: t.baseStatus,
                 picks: t.picks,
                 onPickoff: n.pickBase,
+                align: t.mode === `2P` ? t.align || `기본` : null,
+                onAlign: n.setAlign,
               }),
               (0, S.jsx)(ee, {
                 statusText: t.statusText,
@@ -2488,15 +2568,7 @@ function ce() {
             onNext: () => n.startDemo((t.demo.ci + 1) % BB_DEMO.length),
             onList: n.demoList,
           })
-        : (0, S.jsx)(D, {
-        playballDisabled: t.playballDisabled || t.gameOver,
-        swingDisabled: t.swingDisabled || t.gameOver,
-        paused: t.paused,
-        gameOver: t.gameOver,
-        onPlayball: n.playball,
-        onSwing: n.swing,
-        onPause: n.pauseGame,
-      }),
+        : null,
       (0, S.jsx)(ae, {
         visible: t.paused,
         totalScore: t.totalScore,

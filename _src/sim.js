@@ -73,8 +73,13 @@ var BB_SIM = (() => {
       return lerp(BB_BASES[i], BB_BASES[i + 1], s - i);
     };
 
-  // 스윙 결과(q: 타구 질 0~1, phi: 방향, foul) → 타구
-  function batted(q, phi, foul) {
+  // 번트: 내야 앞에 느리게 굴러가는 땅볼 (foul이면 파울 지역으로)
+  function bunt(foul) {
+    return foul ? { kind: `ground`, foul: !0, bunt: !0, phi: (R() < 0.5 ? -1 : 1) * rnd(48, 70), v0: rnd(8, 14) } : { kind: `ground`, bunt: !0, phi: rnd(-38, 38), v0: rnd(9, 13) };
+  }
+  // 스윙 결과(q: 타구 질 0~1, phi: 방향, foul, plan: 작전) → 타구
+  // plan: down(다운스윙) 땅볼↑ 뜬공↓ / up(어퍼스윙) 뜬공·장타↑ 땅볼↓ 내야 뜬공↑
+  function batted(q, phi, foul, plan) {
     if (foul) {
       let p = (phi < 0 ? -1 : 1) * rnd(48, 78);
       if (q < 0.45) return { kind: `ground`, foul: !0, phi: p, v0: rnd(15, 30) };
@@ -83,16 +88,19 @@ var BB_SIM = (() => {
     }
     // 발사각(타구 종류)은 실제 비율에 가깝게: 땅볼 40% · 직선타 22% · 뜬공 30% · 높이 뜬 내야 뜬공(pop) 8%
     // 타이밍(q)은 타구 속도/비거리를 정함. 빗맞으면 땅볼·내야 뜬공 비중이 커짐
-    let wPop = 0.06 + 0.12 * (1 - q),
-      wGround = 0.4 + 0.15 * (1 - q),
-      r = R() * (wGround + 0.22 + 0.3 + wPop);
+    let up = plan === `up`,
+      down = plan === `down`,
+      wFly = up ? 0.45 : down ? 0.18 : 0.3,
+      wPop = (0.06 + 0.12 * (1 - q)) * (up ? 1.6 : down ? 0.85 : 1),
+      wGround = (0.4 + 0.15 * (1 - q)) * (up ? 0.5 : down ? 1.5 : 1),
+      r = R() * (wGround + 0.22 + wFly + wPop);
     if ((r -= wGround) < 0) return { kind: `ground`, phi, v0: 18 + 26 * q + rnd(-3, 3) };
     if ((r -= 0.22) < 0) {
       let D = Math.max(25, 30 + 70 * q + rnd(-10, 10));
       return { kind: `line`, phi, D, T: 0.25 + D / 45 };
     }
-    if ((r -= 0.3) < 0) {
-      let D = Math.max(35, 43 + 84 * q ** 1.4 + rnd(-16, 8));
+    if ((r -= wFly) < 0) {
+      let D = Math.max(35, 43 + 84 * q ** 1.4 + rnd(-16, 8) + (up ? 4 : 0));
       return { kind: `fly`, phi, D, T: 0.9 + D / 27 };
     }
     return { kind: `pop`, phi, D: rnd(8, 45), T: rnd(3.6, 4.6) };
@@ -250,11 +258,11 @@ var BB_SIM = (() => {
     let fence = bbFence(bb.phi),
       ev = null;
     if (bb.kind === `ground`) {
-      let s = (t) => Math.min(fence - 1.5, bb.v0 * 4 * (1 - Math.exp(-t / 4))),
+      let s = (t) => (bb.bunt ? bb.v0 * 1.3 * (1 - Math.exp(-t / 1.1)) : Math.min(fence - 1.5, bb.v0 * 4 * (1 - Math.exp(-t / 4)))),
         g = (t) => at(bb.phi, s(t)),
         tPast = 0.15;
       while (s(tPast) < 50 && tPast < 6) tPast += 0.05;
-      let f = intercept(IF, g, 0.15, tPast, 1.0);
+      let f = intercept(bb.bunt ? [...IF, `catcher`] : IF, g, 0.15, tPast, 1.0);
       if (f) {
         let err = !st.demo && R() < c.gbErr;
         ev = { key: f.key, t: f.t, p: f.p, infield: !0, error: err, ready: f.t + c.transfer + (err ? 1.4 : 0) };
@@ -781,6 +789,6 @@ var BB_SIM = (() => {
     return start(bb, st).runToEnd().result();
   }
 
-  return { batted, start, play, sample, cfg, basePos };
+  return { batted, bunt, start, play, sample, cfg, basePos };
 })();
 typeof module !== `undefined` && (module.exports = { BB_SIM, bbFence, BB_FIELD_M, BB_BASES }); // Node 테스트용
