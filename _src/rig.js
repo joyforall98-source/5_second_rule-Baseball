@@ -88,6 +88,10 @@ var BB_RIG = (() => {
     contact: { hipYaw: 72, torsoYaw: 84, lean: 22, pel: L(0.07, 0.86, 0.04), ff: L(0.56, 0, 0.05), bf: L(-0.34, 0.03, 0.02), hands: L(0.1, 1.0, 0.42), bat: L(0.22, -0.06, 1), bToeDir: L(0.6, 0, 1) },
     extend: { hipYaw: 92, torsoYaw: 118, lean: 18, pel: L(0.08, 0.87, 0.04), ff: L(0.56, 0, 0.05), bf: L(-0.32, 0.05, 0.04), hands: L(0.38, 1.12, 0.28), bat: L(0.92, 0.08, 0.36), bToeDir: L(0.8, 0, 0.6) },
     follow: { hipYaw: 100, torsoYaw: 152, lean: 10, pel: L(0.07, 0.9, 0.03), ff: L(0.56, 0, 0.05), bf: L(-0.28, 0.08, 0.06), hands: L(0.04, 1.56, -0.12), bat: L(-0.55, 0.18, -0.82), bToeDir: L(1, 0, 0.3) },
+    // 번트: 몸을 투수 쪽으로 돌리고 무릎을 굽혀, 배트를 홈플레이트 위로 수평하게 내밀어 둠
+    bunt: { hipYaw: 42, torsoYaw: 64, lean: 24, pel: L(0, 0.78, 0.02), ff: L(0.44, 0, 0.1), bf: L(-0.3, 0, -0.02), hands: L(0.3, 1.1, 0.16), bat: L(0.16, 0.12, 1), bToeDir: L(0.5, 0, 1) },
+    // 번트 대기: 배트를 공 쪽으로 살짝 밀어 맞힘 (휘두르지 않음)
+    buntHit: { hipYaw: 44, torsoYaw: 66, lean: 25, pel: L(0.02, 0.78, 0.02), ff: L(0.44, 0, 0.1), bf: L(-0.3, 0, -0.02), hands: L(0.4, 1.08, 0.2), bat: L(0.22, 0.1, 1), bToeDir: L(0.5, 0, 1) },
   };
   // ── 투수 키프레임 (우투. f = 홈 방향, s = 닫힌 자세에서 가슴 방향) ──
   let PIT = {
@@ -199,6 +203,10 @@ var BB_RIG = (() => {
             return seq([[0, bat.from], [0.11, B.contact, easeIn], [0.18, B.extend, (x) => x], [0.44, B.follow, easeOut]], d);
           case `take`:
             return seq([[0, bat.from], [0.45, B.stance]], d);
+          case `bunt`:
+            return seq([[0, bat.from], [0.35, B.bunt]], d);
+          case `buntHit`:
+            return seq([[0, bat.from], [0.08, B.buntHit, easeIn], [0.3, B.bunt]], d);
           default: {
             // 대기: 배트를 가볍게 흔듦
             let w = Math.sin(t / 380) * 0.07,

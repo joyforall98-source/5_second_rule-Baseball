@@ -735,7 +735,7 @@ function b() {
       if (!e.isPitched || e.isSwung || (e.swingDisabled && cpu !== !0) || e.gameOver || !P) return;
       ((e.isSwung = !0), (e.swingDisabled = !0), (e.stealWindow = !1));
       let bv = bvRef.current;
-      bv.rig?.batter(`swing`);
+      bv.rig?.batter(cpu !== !0 && e.batPlan === `bunt` ? `buntHit` : `swing`); // 번트는 휘두르지 않고 갖다 댐
       let plan = e.bat !== e.cpu ? e.batPlan : null, // 사람 타자의 타격 작전
         pl = BB_PLAN[plan] || { win: 1, q: 0, lat: 0 },
         win = bbSwingWindow(e.difficulty) * pl.win,
@@ -960,7 +960,7 @@ function b() {
             goWin = bbSwingWindow(e.difficulty) * BB_HINT_WIN;
           (bv.ball && (bv.ball.style.display = `block`),
             bv.rig?.pitcher(`release`),
-            bv.rig?.batter(`load`),
+            bv.rig?.batter(e.bat !== e.cpu && e.batPlan === `bunt` ? `bunt` : `load`),
             // 컴퓨터 타자: 스트라이크는 대부분, 볼은 가끔 휘두름 (타이밍 오차는 난이도별). 투구 루프에서 실행
             (P.cpuSwing =
               e.bat === e.cpu && Math.random() < (P.isStrike ? 0.8 : 0.25)
