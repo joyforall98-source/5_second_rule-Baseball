@@ -434,18 +434,19 @@ function b() {
     },
     oe = (0, _.useCallback)(() => {
       let e = o.current;
-      let kWhy = e.buntK ? `스리번트 파울 삼진` : e.swingMiss ? `헛스윙 삼진` : `루킹 삼진`;
+      let kWhy = e.buntK ? `스리번트 삼진` : e.swingMiss ? `헛스윙 삼진` : `루킹 삼진`,
+        sq = e.buntK && e.squeeze ? ` · 스퀴즈 실패` : ``; // 스퀴즈 중 2스트라이크 번트 파울
       e.buntK = !1;
       if (e.strikes >= 3)
         (e.outs++,
           (e.strikes = 0),
           (e.balls = 0),
-          (e.statusText = `${kWhy} 아웃!`),
-          E(bbOut(kWhy), `#c0392b`),
+          (e.statusText = `${kWhy} 아웃!${sq}`),
+          E(bbOut(kWhy + sq), `#c0392b`),
           e.hitLog.push({
             batter: e.batterNumber,
             team: e.bat,
-            hitType: kWhy,
+            hitType: kWhy + sq,
             rbis: 0,
             scoreAfter: e.totalScore,
             time: Date.now(),
@@ -546,13 +547,14 @@ function b() {
           e.play = null;
           for (let id of [`runner-t`, `runner-1`, `runner-2`, `runner-3`]) a.current[id]?.classList.remove(`manual`);
           if (sim.foul && !sim.foulOut) {
-            (bb.bunt && e.strikes === 2 && ((e.strikes = 3), (e.buntK = !0)),
+            // 2스트라이크 번트 파울은 삼진(스리번트): FOUL 대신 바로 삼진 처리(oe)로
+            let k3 = bb.bunt && e.strikes === 2;
+            (k3 && ((e.strikes = 3), (e.buntK = !0)),
               e.strikes < 2 && e.strikes++,
-              e.squeeze ? E(`파울 · 스퀴즈 실패`, `#e67e22`) : E(`FOUL`, `#e67e22`),
-              (e.statusText = e.squeeze ? `번트 파울 · 스퀴즈 실패` : `파울!`),
+              k3 || (e.squeeze ? E(`파울 · 스퀴즈 실패`, `#e67e22`) : E(`FOUL`, `#e67e22`), (e.statusText = e.squeeze ? `번트 파울 · 스퀴즈 실패` : `파울!`)),
               T());
             if (e.mode === `DEMO`) return void S(() => ((e.demo.phase = `result`), T()), 1200);
-            next(700);
+            next(k3 ? 0 : 700);
             return;
           }
           // 끝내기: 홈런(그라운드 홈런 포함)은 모든 득점, 그 밖에는 결승점까지만 인정
@@ -597,14 +599,16 @@ function b() {
       ((e.stealWindow = !1),
         (e.fieldView = `top-down-view`),
         (e.statusText = bb.steal
-          ? `${e.squeeze ? `번트 실패!` : `도루! 포수 송구`}${e.bat !== e.cpu ? ` · → 진루 / ← 귀루` : ``}`
+          ? e.squeeze
+            ? e.statusText // 스퀴즈를 못 댄 경우: 알림·주자 조작 안내 없이 결과만
+            : `도루! 포수 송구${e.bat !== e.cpu ? ` · → 진루 / ← 귀루` : ``}`
           : bb.pick
             ? `런다운!${e.bat !== e.cpu ? ` → 진루 / ← 귀루` : ``}`
             : bb.foul
           ? `파울 타구`
           : P.homeRun
             ? `큰 타구! 넘어가나…`
-            : `${bb.bunt ? `번트` : { ground: `땅볼`, line: `직선타`, fly: `뜬공`, pop: `뜬공` }[bb.kind]}!${e.mode === `DEMO` ? `` : ` → 진루 / ← 귀루`}`),
+            : `${bb.bunt ? `번트` : { ground: `땅볼`, line: `직선타`, fly: `뜬공`, pop: `뜬공` }[bb.kind]}!${e.mode === `DEMO` || e.squeeze ? `` : ` → 진루 / ← 귀루`}`),
         (e.distanceText = `-`),
         te(),
         ball && ((ball.style.display = `block`), (ball.style.width = ball.style.height = `8px`)),
