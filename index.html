@@ -2159,7 +2159,7 @@ function b() {
     humanDef = () => o.current.mode === `2P` || o.current.bat === o.current.cpu,
     l = () => {
       let e = o.current;
-      ((e.batterNumber = e.batterNumber >= 9 ? 1 : e.batterNumber + 1), (e.picks = 0), (e.batPlan = null));
+      ((e.batterNumber = e.batterNumber >= 9 ? 1 : e.batterNumber + 1), (e.batPlan = null));
     },
     u = (0, _.useRef)(null),
     d = (0, _.useRef)(null),
@@ -2362,7 +2362,7 @@ function b() {
       let e = o.current;
       if (!e.halfBreak) return;
       ((e.halfBreak = null), e.half === `top` ? (e.half = `bottom`) : ((e.half = `top`), e.inning++), (e.bat = e.half === `top` ? 0 : 1), loadTeam());
-      ((e.outs = 0), (e.strikes = 0), (e.balls = 0), (e.baseStatus = [!1, !1, !1]), (e.tbRunner = null), (e.picks = 0), (e.batPlan = null), (e.align = null));
+      ((e.outs = 0), (e.strikes = 0), (e.balls = 0), (e.baseStatus = [!1, !1, !1]), (e.tbRunner = null), (e.batPlan = null), (e.align = null));
       // 승부치기: 직전 타순의 타자를 2루 주자로 두고 무사 2루에서 시작
       e.inning > e.innings && ((e.baseStatus = [!1, !0, !1]), (e.tbRunner = e.batterNumber === 1 ? 9 : e.batterNumber - 1));
       (re(), ae());
@@ -3046,12 +3046,12 @@ function b() {
     if (!rr || s.paused || (s.pickWarn && rr.go) || (go === `advance` && rr.b < 3 && s.baseStatus[rr.b])) return;
     ((rr.go = go), T());
   };
-  // 사람 수비의 직접 견제 (타자당 2번까지). 끝나면 다시 투구 선택
+  // 사람 수비의 직접 견제. 끝나면 다시 투구 선택
   let pickBase = (0, _.useCallback)(
     (b) => {
       let s = o.current;
-      if (!s.awaitPitch || s.paused || s.halfBreak || s.gameOver || !s.baseStatus[b - 1] || s.picks >= 2) return;
-      ((s.picks = (s.picks || 0) + 1), (s.awaitPitch = !1), pickoff(b, () => oe() || ae()));
+      if (!s.awaitPitch || s.paused || s.halfBreak || s.gameOver || !s.baseStatus[b - 1]) return;
+      ((s.awaitPitch = !1), pickoff(b, () => oe() || ae()));
     },
     [oe, ae],
   );
@@ -3238,7 +3238,6 @@ function b() {
       endInfo: j.endInfo,
       awaitPitch: j.awaitPitch,
       pitchSel: { type: j.pitchSel.type, zone: !!j.pitchSel.zone },
-      picks: j.picks || 0,
       batPlan: j.batPlan,
       leads: j.leads || [0, 0, 0],
       align: j.align,
@@ -3726,7 +3725,7 @@ function RunnerAlert({ alert, onGo }) {
   });
 }
 // 수비 투구 선택: 구종 버튼 + 존 주변 클릭으로 도달 지점
-function PitchPrompt({ show, sel, defName, onPick, bases, picks, onPickoff, align, onAlign }) {
+function PitchPrompt({ show, sel, defName, onPick, bases, onPickoff, align, onAlign }) {
   return show
     ? (0, S.jsxs)(`div`, {
         className: `bb-pitchprompt`,
@@ -3745,7 +3744,6 @@ function PitchPrompt({ show, sel, defName, onPick, bases, picks, onPickoff, alig
               children: Object.keys(BB_ALIGN).map((k) => (0, S.jsx)(`button`, { className: align === k ? `on` : ``, onClick: () => onAlign(k), children: `수비 ${k}` }, k)),
             }),
           bases.some(Boolean) &&
-            picks < 2 &&
             (0, S.jsx)(`div`, {
               className: `bb-pitchprompt-types pick`,
               children: [1, 2, 3].map((b) => bases[b - 1] && (0, S.jsx)(`button`, { onClick: () => onPickoff(b), children: `⇧${b} ${b}루 견제` }, b)),
@@ -3763,7 +3761,7 @@ var HOWTO = [
   [`투구 코스`, `존 클릭 · 또는 QWE/ASD/ZXC (⇧ 볼)`],
   [`주루`, `→ 진루 · ← 귀루 · 주자를 눌러 도루·리드 폭`],
   [`견제 동작`, `← 빨리 귀루하면 세이프 · 스타트하면 런다운`],
-  [`견제`, `수비 때 견제 버튼 · ⇧1–3 (타자당 2번)`],
+  [`견제`, `수비 때 견제 버튼 · ⇧1–3`],
   [`일시정지`, `Esc`],
   [`5초 룰`, `타구 5초 뒤 주루 지시 마감, 판정 확정`],
   [`연장`, `동점이면 무사 2루 승부치기`],
@@ -4354,7 +4352,6 @@ function ce() {
                 defName: t.teams[1 - t.bat]?.name,
                 onPick: n.pickPitch,
                 bases: t.baseStatus,
-                picks: t.picks,
                 onPickoff: n.pickBase,
                 align: t.mode === `2P` ? t.align || `기본` : null,
                 onAlign: n.setAlign,
