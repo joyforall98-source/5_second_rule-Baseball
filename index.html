@@ -2565,14 +2565,14 @@ function b() {
         (e.statusText = bb.steal
           ? e.squeeze
             ? e.statusText // 스퀴즈를 못 댄 경우: 알림·주자 조작 안내 없이 결과만
-            : `도루! 포수 송구${e.bat !== e.cpu ? ` · → 진루 / ← 귀루` : ``}`
+            : `도루! 포수 송구`
           : bb.pick
-            ? `런다운!${e.bat !== e.cpu ? ` → 진루 / ← 귀루` : ``}`
+            ? `런다운!`
             : bb.foul
           ? `파울 타구`
           : P.homeRun
             ? `큰 타구! 넘어가나…`
-            : `${bb.bunt ? `번트` : { ground: `땅볼`, line: `직선타`, fly: `뜬공`, pop: `뜬공` }[bb.kind]}!${e.mode === `DEMO` || e.squeeze ? `` : ` → 진루 / ← 귀루`}`),
+            : `${bb.bunt ? `번트` : { ground: `땅볼`, line: `직선타`, fly: `뜬공`, pop: `뜬공` }[bb.kind]}!`),
         (e.distanceText = `-`),
         te(),
         ball && ((ball.style.display = `block`), (ball.style.width = ball.style.height = `8px`)),
