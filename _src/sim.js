@@ -74,7 +74,10 @@ var BB_SIM = (() => {
     };
 
   // 번트: 내야 앞에 느리게 굴러가는 땅볼 (foul이면 파울 지역으로)
-  function bunt(foul) {
+  // phi: 방향(없으면 무작위), high: 높은 공·볼에 댔는지 (주면 가끔 뜨는 번트: 높으면 30%, 아니면 6%)
+  function bunt(foul, phi, high) {
+    if (high != null && !foul && R() < (high ? 0.3 : 0.06)) return { kind: `pop`, bunt: !0, phi: phi ?? rnd(-30, 30), D: rnd(4, 14), T: rnd(1.4, 2.2) };
+    if (phi != null && !foul) return { kind: `ground`, bunt: !0, phi, v0: rnd(9, 13) };
     return foul ? { kind: `ground`, foul: !0, bunt: !0, phi: (R() < 0.5 ? -1 : 1) * rnd(48, 70), v0: rnd(8, 14) } : { kind: `ground`, bunt: !0, phi: rnd(-38, 38), v0: rnd(9, 13) };
   }
   // 스윙 결과(q: 타구 질 0~1, phi: 방향, foul, plan: 작전) → 타구
@@ -129,6 +132,8 @@ var BB_SIM = (() => {
   // noChase 파울 뜬공을 아무도 쫓지 않음
   function start(bb, st) {
     let FM = st.fielders ? { ...BB_FIELD_M, ...st.fielders } : BB_FIELD_M,
+      // 번트 시프트: 타자가 번트 자세를 보이면 투구와 함께 1루수·3루수가 앞으로 (DEMO는 그대로)
+      shift = bb.bunt && !st.demo,
       c = cfg(st.diff),
       bases = st.bases,
       P = {
@@ -161,13 +166,16 @@ var BB_SIM = (() => {
         cover: { 1: `inf-1b`, 2: `inf-ss`, 3: `inf-3b`, 4: `catcher` },
         ev: null,
       };
+    // 2루수는 1루 커버, 유격수는 2루 커버를 위해 투구와 함께 그쪽으로
+    shift && (FM = { ...FM, "inf-1b": { x: 14, y: 19 }, "inf-3b": { x: -14, y: 18 }, "inf-2b": { x: 14, y: 34 }, "inf-ss": { x: -6, y: 39 } });
     for (let k in FM) {
       let m = FM[k];
       P.f[k] = {
         x: m.x,
         y: m.y,
         goal: null,
-        startAt: c.react + (k === `pitcher` ? 0.2 : 0), // 투수는 투구 동작 직후라 반응이 조금 늦음
+        // 투수는 투구 동작 직후라 반응이 조금 늦음. 번트 시프트로 달려 나오던 1루수·3루수는 거의 바로
+        startAt: shift && k.startsWith(`inf`) ? 0.1 : c.react + (k === `pitcher` ? 0.2 : 0),
         spd: k.startsWith(`out`) ? c.ofSpd : c.ifSpd,
       };
     }
@@ -328,7 +336,8 @@ var BB_SIM = (() => {
         ev = { key: o.key, t: o.t, p: o.p, ready: o.t + c.transfer + 0.15 };
       } else {
         // 높이 뜬 내야 뜬공은 투수 대신 야수·포수가 잡음
-        let keys = bb.kind === `pop` ? [...IF.filter((k) => k !== `pitcher`), `catcher`, ...OF] : [...OF, ...IF],
+        // 뜬 번트는 낮고 짧아 투수·포수도 잡음
+        let keys = bb.bunt ? [...IF, `catcher`] : bb.kind === `pop` ? [...IF.filter((k) => k !== `pitcher`), `catcher`, ...OF] : [...OF, ...IF],
           slack = bb.kind === `line` ? 1.0 : 1.6,
           best = null;
         for (let k of keys) {
@@ -374,6 +383,8 @@ var BB_SIM = (() => {
       ev.key === P.cover[2] && (P.cover[2] = P.cover[2] === `inf-ss` ? `inf-2b` : `inf-ss`),
       (P.cover[3] = ev.key === `inf-3b` ? (P.cover[2] === `inf-ss` ? `pitcher` : `inf-ss`) : `inf-3b`),
       (P.cover[4] = ev.key === `catcher` ? `pitcher` : `catcher`));
+    // 번트 시프트 커버: 1루는 2루수, 2루는 유격수, 3루수가 번트를 잡으면 3루는 투수
+    shift && ((P.cover[1] = `inf-2b`), (P.cover[2] = `inf-ss`), ev.key === `inf-3b` && (P.cover[3] = `pitcher`));
     for (let b = 1; b <= 4; b++) {
       let k = P.cover[b];
       k !== ev.key && (P.f[k].goal = { ...BB_BASES[b] });
@@ -396,13 +407,16 @@ var BB_SIM = (() => {
       if (r === bat) continue;
       r.forced = r.from === 1 ? !0 : r.from === 2 ? bases[0] : bases[0] && bases[1];
       if (r.stealing) continue; // 도루 스타트한 주자는 그대로 달림 (히트 앤드 런)
+      // 공이 맞을 때 주자는 리드한 자리(1·3루 2.7m, 2루 5.5m, 넓게·짧게 ±1.6m)에서 출발 (DEMO는 그대로)
+      st.demo || (r.s = r.from + (r.from === 2 ? 0.2 : 0.1) + ((st.leads || [])[r.from - 1] || 0) * 0.06);
       if (two) {
         // 2아웃: 타격과 동시에 출발
-        ((r.state = `run`), (r.delay = 0.1), (r.s = r.from + 0.06), (r.target = r.from + 1));
+        ((r.state = `run`), (r.delay = 0.1), (r.s = st.demo ? r.from + 0.06 : r.s), (r.target = r.from + 1));
       } else if (bb.kind === `ground`) {
         if (r.forced) ((r.state = `run`), (r.delay = 0.1), (r.target = r.from + 1));
         else if (r.from === 2 && bb.phi > 8) ((r.state = `run`), (r.delay = 0.1), (r.target = 3));
         else if (r.from === 3 && (ev.key === `inf-1b` || ev.key === `inf-2b`)) ((r.state = `run`), (r.delay = 0.1), (r.target = 4));
+        else r.s > r.from && ((r.state = `run`), (r.delay = 0.1), (r.target = r.from)); // 안 뛰는 주자는 리드에서 베이스로 돌아감
       } else {
         // 뜬공·직선타: 리드한 채로 타구를 지켜봄
         ((r.state = `wait`),
@@ -577,9 +591,11 @@ var BB_SIM = (() => {
             // 타자·뒤 주자의 추가 진루를 막음
             need = d > 45 && k >= 3 ? BB_RELAY_MARGIN : 0.05;
           if (tt + need < rt) {
-            // 2아웃이면 가장 확실한 아웃, 아니면 앞선 주자(실점 방지) 우선
+            // 2아웃이면 가장 확실한 아웃, 아니면 앞선 주자(실점 방지) 우선.
+            // 단 앞 주자가 아슬아슬하면(0.25초 미만) 확실한 타자 아웃을 먼저 (그것도 없을 때만 승부, DEMO는 그대로)
             let twoOut = P.st.outs + P.outs.length === 2,
-              score = (twoOut ? 0 : k * 10) + (isForce(r, k) ? 5 : 0) + (rt - tt) * (twoOut ? 10 : 1);
+              close = !P.st.demo && !twoOut && r !== bat && rt - tt < 0.25,
+              score = (twoOut ? 0 : k * 10) + (isForce(r, k) ? 5 : 0) + (rt - tt) * (twoOut ? 10 : 1) - (close ? 1000 : 0);
             (!best || score > best.score) && (best = { k, score });
           }
         }
@@ -932,7 +948,7 @@ var BB_SIM = (() => {
     }
     if (P.caught) {
       let sac = runs > 0 && total < 3;
-      ((why = `${pos} ${sac ? `희생플라이` : KIND_OUT[bb.kind]}`), (label = why));
+      ((why = `${pos} ${bb.bunt ? `번트 뜬공` : sac ? `희생플라이` : KIND_OUT[bb.kind]}`), (label = why));
       otherOuts.length && ((why += otherOuts.some((o) => o.early) ? ` · 주자가 일찍 출발해 아웃` : ` · 더블플레이`), (label = why));
     } else if (batOut) {
       if (bat.touched === 0)

@@ -282,6 +282,7 @@ function b() {
       let e = o.current;
       ((e.isPitched = !1),
         (e.isSwung = !1),
+        (e.squeeze = !1),
         (e.steal = null)); // 도루 스타트한 주자 { 루: 스타트 시각(투구 경과 ms, 와인드업 중이면 -300) }
       let r = t.current;
       (r &&
@@ -556,6 +557,11 @@ function b() {
             let fix = (s) => s.replace(`${sim.runs}타점`, `${need}타점`).replace(`${sim.runs}점 득점`, `${need}점 득점`);
             sim = { ...sim, runs: need, label: fix(sim.label), display: fix(sim.display), status: fix(sim.status) };
           }
+          // 스퀴즈를 못 대서 3루 주자만 뛴 경우는 홈스틸이 아니라 스퀴즈 실패
+          if (e.squeeze && sim.runnerOnly) {
+            let fix = (s) => s && s.replace(`홈스틸`, `스퀴즈`);
+            sim = { ...sim, label: fix(sim.label), status: fix(sim.status) };
+          }
           // 점수판 H·E: 안타(홈런 포함, 실책·야수선택 출루 제외)는 공격 팀, 실책은 수비 팀
           (sim.homeRun || (sim.batterBase >= 1 && !sim.caught && !sim.error && !/야수선택/.test(sim.label))) && e.teams[e.bat].h++;
           sim.error && e.teams[1 - e.bat].e++;
@@ -806,7 +812,14 @@ function b() {
           (bv.ball && (bv.ball.style.display = `none`),
             bv.marker && (bv.marker.style.display = `none`));
           // 방향: lat ±16 → 파울라인 ±45°. 타구 종류·비거리·수비 결과는 sim.js가 결정
-          pb(plan === `bunt` ? BB_SIM.bunt(off > 1 || Math.random() < 0.25) : BB_SIM.batted(q, (lat * 45) / 16, q < 0.12 || Math.abs(lat) > 16, plan));
+          // 번트도 타이밍으로 방향(일찍 → 당기는 쪽), 높은 공·볼에 대면 가끔 뜸 (DEMO는 그대로)
+          pb(
+            plan === `bunt`
+              ? e.mode === `DEMO`
+                ? BB_SIM.bunt(off > 1 || Math.random() < 0.25)
+                : BB_SIM.bunt(off > 1 || Math.random() < 0.25, Math.max(-38, Math.min(38, (lat * 45) / 16)), P.zy > 0.55 || off > 1)
+              : BB_SIM.batted(q, (lat * 45) / 16, q < 0.12 || Math.abs(lat) > 16, plan),
+          );
         }, 450));
     }, [S, T]),
     // 견제: b루로 던져 견제사 또는 세이프. 끝나면 done(out)
@@ -927,6 +940,12 @@ function b() {
               (bv.marker.style.top = bbPlateY(P.zy) + `px`)),
             bbDrawBall(bv.ball, P, 0),
             (e.statusText = `투구!`),
+            // 스퀴즈: 사람 타자가 번트 작전이고 3루 주자가 있으면 투구와 함께 홈으로 스타트
+            e.bat !== e.cpu &&
+              e.mode !== `DEMO` &&
+              e.batPlan === `bunt` &&
+              e.baseStatus[2] &&
+              ((e.steal = { ...e.steal, 3: 0 }), (e.squeeze = !0), (e.statusText = `스퀴즈! 3루 주자 스타트`)),
             // 컴퓨터 공격: 가끔 도루 (1루 → 2루 7%, 2루 → 3루 3%, 다음 루가 비었을 때). 리드가 넓을수록 견제가 유리
             e.bat === e.cpu &&
               e.mode !== `DEMO` &&
