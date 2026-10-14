@@ -455,9 +455,9 @@ var BB_SIM = (() => {
         P.done || ((P.done = !0), (P.endT = P.t));
       },
       isForce = (r, k) => (r === bat && k === 1) || (r.forced && k === r.from + 1) || (r.retouch && k === r.from),
-      out = (r, k, force, by) => {
+      out = (r, k, force, by, tag) => {
         if (!live(r)) return;
-        ((r.state = `out`), (r.outT = P.t), P.outs.push({ id: r.id, base: k, t: P.t, force, by }));
+        ((r.state = `out`), (r.outT = P.t), P.outs.push({ id: r.id, base: k, t: P.t, force, by, tag })); // tag: 베이스 사이 태그아웃 문구
         // 뒤 주자가 아웃되면 앞 주자의 포스 상황이 풀림
         for (let i = 0; i < idx(r); i++) P.r[i].forced = !1;
         P.st.outs + P.outs.length >= 3 && finish();
@@ -535,7 +535,17 @@ var BB_SIM = (() => {
         if (P.throws >= 6) return !1;
         let ft = P.st.firstThrow;
         if (ft && !P.throws) return (throwTo(ft.base, ft.carry), !0); // DEMO: 정해진 첫 송구
-        if (!P.st.demo && P.holder.startsWith(`out`)) return ofDefense();
+        if (!P.st.demo) {
+          if (P.rd) return !0; // 협살 중 (tick에서 처리)
+          // 달려오는 주자가 곧 손 닿을 거리면 던지지 않고 태그하러 감
+          let f = P.f[P.holder];
+          for (let r of P.r)
+            if (live(r) && r.state === `run` && !r.trot && r.delay <= 0 && P.holderBase !== r.target) {
+              let p2 = basePos(r.s + Math.sign(r.target - r.s) * Math.min(Math.abs(r.target - r.s), speed(r) * 0.4));
+              if (dist(f, p2) < 1.2 + f.spd * 0.4) return ((f.goal = p2), (f.via = null), (P.holderBase = null), !0);
+            }
+          if (P.holder.startsWith(`out`)) return ofDefense();
+        }
         let h = P.f[P.holder],
           best = null;
         for (let r of P.r) {
@@ -611,12 +621,26 @@ var BB_SIM = (() => {
         for (let r of P.r) {
           if (!live(r) || r.state !== `run` || r.target !== k) continue;
           let remain = Math.abs(k - r.s) * BB_LEG;
-          if (isForce(r, k) || remain <= 8) out(r, k, isForce(r, k), b.by);
-          else if (!r.manual && !r.retouch) setTarget(r, k > r.s ? r.touched : Math.ceil(r.s)); // 늦었으면 되돌아감
+          // 베이스 가까이(DEMO 8m, 실제 경기 3m)면 멈추지 못해 아웃. 실제 경기에서 그보다 멀면 되돌아가다 협살에 걸릴 수 있음
+          if (isForce(r, k) || remain <= (P.st.demo ? 8 : 3)) out(r, k, isForce(r, k), b.by);
+          else if (!r.manual && !r.retouch) (setTarget(r, k > r.s ? r.touched : Math.ceil(r.s)), P.st.demo || startRd(r)); // 늦었으면 되돌아감
         }
+        // 협살 중 공을 받으면 주자는 멈칫하고(0.5초) 반대 베이스로
+        if (b.rd && P.rd) {
+          let r = P.r.find((x) => x.id === P.rd.id);
+          live(r) && ((P.rd.flee = P.rd.flee === P.rd.lo ? P.rd.lo + 1 : P.rd.lo), setTarget(r, P.rd.flee), (r.delay = 0.5));
+        }
+      },
+      // 협살 시작: 되돌아가는 주자보다 공이 먼저 그 베이스에 닿을 수 있으면, 두 베이스 사이에 가둠
+      // P.rd = { id, lo: 두 베이스 중 앞쪽, flee: 주자가 향하는 베이스 }
+      startRd = (r) => {
+        let back = r.target;
+        if (P.rd || P.cover[back] === P.holder) return;
+        Math.max(thrT(P.f[P.holder], back), recvT(back)) + 0.05 < runnerTime(r, back) && (P.rd = { id: r.id, lo: Math.floor(r.s), flee: back });
       },
       arriveBase = (r) => {
         let k = r.target;
+        P.rd && P.rd.id === r.id && (P.rd = null); // 베이스에 닿으면 협살 끝
         if (P.ball.mode === `held` && P.holderBase === k && !r.trot) return out(r, k, isForce(r, k), P.assistBy || P.holder);
         r.retouch && k === r.from && (r.retouch = !1);
         if (k > r.touched) r.touched = k;
@@ -706,6 +730,34 @@ var BB_SIM = (() => {
         for (let r of P.r) {
           let l = leadOf(r);
           if (l && live(r) && r.s > l.s + 0.03 && (out(r, Math.min(4, Math.max(1, Math.round(l.s))), !1, `pass`), P.done)) return;
+        }
+        // 공을 든 수비수가 베이스를 벗어난 주자에게 닿으면(1.2m) 태그아웃 (DEMO는 그대로)
+        if (!P.st.demo && P.ball.mode === `held` && P.holder) {
+          let f = P.f[P.holder];
+          for (let r of P.r)
+            if (live(r) && !r.trot && Math.abs(r.s - Math.round(r.s)) * BB_LEG > 0.6 && dist(f, basePos(r.s)) < 1.2 && (out(r, r.target, isForce(r, r.target), P.holder, P.rd && P.rd.id === r.id ? `협살 태그아웃` : `태그아웃`), P.done)) return;
+        }
+        // 협살: 공 든 선수가 주자를 몰고, 주자가 반대편 수비수에게 가까워지면 그쪽으로 던짐
+        // (공이 닿을 때 주자와 2.5m쯤 남게 → 주자가 멈칫하는 사이 태그). 던진 선수는 자기 쪽 베이스를 맡음
+        if (P.rd) {
+          let r = P.r.find((x) => x.id === P.rd.id);
+          if (!live(r) || r.state !== `run`) P.rd = null;
+          else if (P.ball.mode === `held`) {
+            let f = P.f[P.holder],
+              rp = basePos(r.s),
+              other = P.rd.flee === P.rd.lo ? P.rd.lo + 1 : P.rd.lo,
+              recK = P.cover[P.rd.flee],
+              rec = P.f[recK];
+            ((f.goal = rp), (f.via = null), (P.holderBase = null));
+            if (recK !== P.holder && dist(rp, rec) <= 2.5 + speed(r) * BB_LEG * (dist(f, rec) / c.thr + 0.05)) {
+              let from = { x: f.x, y: f.y },
+                to = { x: rec.x, y: rec.y };
+              ((P.ball = { mode: `thrown`, from, to, t0: t, t1: t + dist(from, to) / c.thr + 0.05, toBase: null, receiver: recK, by: P.holder, rd: !0, x: from.x, y: from.y, h: 1.5 }),
+                (f.goal = { ...BB_BASES[other] }),
+                (P.cover[other] = P.holder),
+                (rec.goal = null));
+            }
+          }
         }
         // 고정 종료(파울), 홈런은 모든 주자가 홈에 들어오면
         if (P.fixedEnd != null) {
@@ -822,7 +874,7 @@ var BB_SIM = (() => {
       batOut = outs.find((o) => o.id === `runner-t`),
       otherOuts = outs.filter((o) => o.id !== `runner-t`),
       baseName = (k) => (k === 4 ? `홈` : `${k}루`),
-      throwWhy = (o) => (o.base === 4 ? `${BB_POS[o.by] || pos} 홈 보살` : `${BB_POS[o.by] || pos} → ${baseName(o.base)} 송구 아웃`),
+      throwWhy = (o) => o.tag ? `${BB_POS[o.by] || pos} ${o.tag}` : (o.base === 4 ? `${BB_POS[o.by] || pos} 홈 보살` : `${BB_POS[o.by] || pos} → ${baseName(o.base)} 송구 아웃`),
       why = null,
       label;
     if (P.caught) {
