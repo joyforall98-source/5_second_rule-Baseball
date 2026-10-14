@@ -64,8 +64,8 @@ var BB_SIM = (() => {
     // 난이도별 수비 능력. EASY는 송구가 느리고(21m/s) 수비 반응이 늦음. 주자 속도(run)는 같음
     cfg = (diff) =>
       diff === `HARD`
-        ? { thr: 29, ofSpd: 8.0, ifSpd: 6.4, react: 0.3, run: 7.3, flyErr: 0.015, gbErr: 0.02, transfer: 0.5 }
-        : { thr: 21, ofSpd: 7.4, ifSpd: 6.0, react: 0.4, run: 7.3, flyErr: 0.03, gbErr: 0.04, transfer: 0.65 },
+        ? { thr: 29, ofSpd: 8.0, ifSpd: 6.4, react: 0.3, run: 7.3, flyErr: 0.015, gbErr: 0.02, transfer: 0.5, pop: 0.75 }
+        : { thr: 21, ofSpd: 7.4, ifSpd: 6.0, react: 0.4, run: 7.3, flyErr: 0.03, gbErr: 0.04, transfer: 0.65, pop: 0.45 }, // pop: 도루 때 포수 송구 준비(+0~0.6초)
     // 베이스 경로 위치 s(0=홈, 1=1루 … 4=홈) → 좌표
     basePos = (s) => {
       s = clamp(s, 0, 4);
@@ -191,6 +191,16 @@ var BB_SIM = (() => {
     for (let b of [3, 2, 1]) bases[b - 1] && P.r.push(mk(`runner-${b}`, b));
     // 리드(st.leads[루-1] = -1 짧게 · 0 보통 · 1 넓게): 넓게 잡은 주자는 조금 앞에서 출발
     for (let r of P.r) r.s += Math.max(0, (st.leads || [])[r.from - 1] || 0) * 0.06;
+    // 도루 스타트한 주자 (st.steal = { 루: 스타트 뒤 뛴 시간(초) }): 리드(1·3루 2.7m, 2루는 수비가 비어 있어 5.5m,
+    // 넓게 +1.6m, 짧게 -1.6m)에 뛴 만큼 더 앞에서
+    for (let r of P.r) {
+      let run = (st.steal || {})[r.from];
+      run != null &&
+        ((r.stealing = !0),
+        (r.s = Math.min(r.from + 0.92, r.from + (r.from === 2 ? 0.2 : 0.1) + ((st.leads || [])[r.from - 1] || 0) * 0.06 + (Math.max(0, run) * c.run * 1.08) / BB_LEG)),
+        (r.state = `run`),
+        (r.target = r.from + 1));
+    }
     let bat = mk(`runner-t`, 0);
     st.batRun && (bat.run = st.batRun);
     (P.r.push(bat), (P.bat = bat));
@@ -233,6 +243,28 @@ var BB_SIM = (() => {
             k = keys.reduce((a, b) => (dist(FM[a], p) < dist(FM[b], p) ? a : b));
           return { key: k, t: Math.max(t1, need(k, p, 1)), p, n: need(k, p, 1) };
         })();
+
+    // ── 도루(bb.steal: 포수가 공을 받은 순간부터) · 견제 런다운(bb.pick = 루: 투수가 스타트한 그 주자를 잡으려는 순간부터) ──
+    // 타자는 뛰지 않음. 주자가 있는 베이스와 그 다음 베이스의 커버는 투구 동안(0.5초) 이미 움직이기 시작함
+    if (bb.steal || bb.pick) {
+      (P.r.pop(), (P.runnerOnly = !0), (P.cover = { 1: `inf-1b`, 2: `inf-ss`, 3: `inf-3b`, 4: `catcher` }));
+      let k0 = bb.steal ? `catcher` : `pitcher`;
+      for (let b = 1; b <= 4; b++) {
+        let f = P.f[P.cover[b]],
+          B = BB_BASES[b],
+          d = dist(f, B),
+          m = Math.min(d, f.spd * 0.5);
+        if (P.cover[b] === k0 || !(bases[b - 1] || bases[b - 2] || b === 4)) continue;
+        ((f.startAt = 0), (f.goal = { ...B }), d > 0 && ((f.x += ((B.x - f.x) / d) * m), (f.y += ((B.y - f.y) / d) * m)));
+      }
+      if (bb.pick) {
+        let r = P.r.find((x) => x.from === bb.pick);
+        r && ((r.s += 0.12), (r.state = `run`), (r.target = r.from + 1)); // 이미 다음 루로 스타트
+      }
+      // 포수가 받고 나서 던지기까지(EASY 0.45~1.05초, HARD 0.75~1.35초. HARD는 송구가 빨라 전체로는 더 빠름), 투수는 바로 돌아서 던짐
+      P.ev = { key: k0, t: 0, p: { x: P.f[k0].x, y: P.f[k0].y }, ready: bb.steal ? c.pop + rnd(0, 0.6) : 0.35 };
+      return wrap(P);
+    }
 
     // ── 파울 ──
     if (bb.foul) {
@@ -363,6 +395,7 @@ var BB_SIM = (() => {
     for (let r of P.r) {
       if (r === bat) continue;
       r.forced = r.from === 1 ? !0 : r.from === 2 ? bases[0] : bases[0] && bases[1];
+      if (r.stealing) continue; // 도루 스타트한 주자는 그대로 달림 (히트 앤드 런)
       if (two) {
         // 2아웃: 타격과 동시에 출발
         ((r.state = `run`), (r.delay = 0.1), (r.s = r.from + 0.06), (r.target = r.from + 1));
@@ -551,6 +584,7 @@ var BB_SIM = (() => {
           }
         }
         if (best) return (throwTo(best.k), !0);
+        if (P.runnerOnly) return !1; // 도루·런다운: 늦었으면 던지지 않음 (1·3루에서 3루 주자에게 홈을 내주지 않게)
         // 잡을 수 없으면: 달리는 주자가 더 못 가도록 맨 뒤 주자의 다음 베이스로
         let moving = P.r.filter((r) => live(r) && r.state === `run` && r.target > r.s);
         if (moving.length) {
@@ -869,6 +903,33 @@ var BB_SIM = (() => {
       throwWhy = (o) => o.tag ? `${BB_POS[o.by] || pos} ${o.tag}` : (o.base === 4 ? `${BB_POS[o.by] || pos} 홈 보살` : `${BB_POS[o.by] || pos} → ${baseName(o.base)} 송구 아웃`),
       why = null,
       label;
+    // 도루·견제 런다운: 타자 없이 주자만
+    if (P.runnerOnly) {
+      let parts = [],
+        steals = 0,
+        counted = P.runs.filter((x) => !third || (!third.force && x.t < third.t)).map((x) => x.id);
+      for (let r of P.r) {
+        let o = outs.find((x) => x.id === r.id),
+          f = r.from;
+        if (o) (parts.push(`${f}루 주자 ${r.stealing ? (o.base === 4 ? `홈스틸 실패` : `도루 실패`) : /협살/.test(o.tag) ? `런다운 아웃` : `${baseName(o.base)}에서 아웃`}`), why || (why = throwWhy(o)));
+        else if (r.s === f && r.state === `safe` && (r.stealing || bb.pick === f)) parts.push(`${f}루 주자 귀루`);
+        else if (counted.includes(r.id)) parts.push(r.stealing && f === 3 ? `홈스틸 성공` : `${f}루 주자 득점`);
+        else if (r.s > f && Number.isInteger(r.s))
+          r.stealing && r.s === f + 1 ? (steals++, parts.push(`${f}루 → ${r.s}루 도루 성공`)) : parts.push(`${f}루 주자 ${r.s}루까지`);
+      }
+      label = parts.join(` · `) || `주자 그대로`;
+      P.rdErr && ((res.rdErr = P.rdErr), (label += ` · 협살 중 ${BB_POS[P.rdErr]} 송구 실책`));
+      return Object.assign(res, {
+        runnerOnly: !0,
+        outsAdded: outs.length,
+        runs,
+        newBases: nb,
+        label,
+        display: why ? bbOut(why) : runs ? `득점!` : steals > 1 ? `더블스틸!` : steals ? `도루 성공!` : `SAFE!`,
+        color: why ? `#c0392b` : runs ? `#f1c40f` : `#2ecc71`,
+        status: label,
+      });
+    }
     if (P.caught) {
       let sac = runs > 0 && total < 3;
       ((why = `${pos} ${sac ? `희생플라이` : KIND_OUT[bb.kind]}`), (label = why));

@@ -208,7 +208,6 @@ function b() {
       pitchSel: { type: null, zone: null, out: !1 },
       tbRunner: null, // 승부치기 2루 주자 타순
     }),
-    s = () => ({ steal: o.current.difficulty === `HARD` ? { 1: 0.28, 2: 0.18, 3: 0.1 } : { 1: 0.55, 2: 0.45, 3: 0.3 } }),
     // 주자의 리드 폭 (-1 짧게 · 0 보통 · 1 넓게). 넓으면 도루 성공↑ 견제 위험↑
     lead = (b) => (o.current.leads || [])[b - 1] || 0,
     // 사람이 수비(투구)하는 차례인가: 2인 대결은 항상, 컴퓨터 대결은 컴퓨터가 공격할 때
@@ -282,7 +281,8 @@ function b() {
     ne = () => {
       let e = o.current;
       ((e.isPitched = !1),
-        (e.isSwung = !1));
+        (e.isSwung = !1),
+        (e.steal = null)); // 도루 스타트한 주자 { 루: 스타트 시각(투구 경과 ms, 와인드업 중이면 -300) }
       let r = t.current;
       (r &&
         ((r.style.display = `none`),
@@ -484,9 +484,12 @@ function b() {
     }, [T]),
     // 타구 진행: sim.js의 플레이를 2배속으로 실시간 진행. 5초 동안 주자에게 진루/귀루 지시 가능.
     // 플레이는 홈런 주자 홈인·중계 플레이까지 끝까지 보여준 뒤 다음 투구로
-    pb = (bb) => {
+    // bb.steal: 도루(포수가 공을 받은 뒤부터) · bb.pick = 루: 견제에 걸린 주자의 런다운. after: 끝난 뒤 다음 할 일 (기본은 다음 투구)
+    pb = (bb, after) => {
       let e = o.current,
-        P = BB_SIM.start(bb, { bases: [...e.baseStatus], outs: e.outs, diff: e.difficulty, leads: e.mode === `DEMO` ? null : e.leads, ...(e.mode === `DEMO` ? e.demoSim : e.align ? { fielders: bbAlign(e.align) } : null) }),
+        // 도루 스타트한 주자가 뛴 시간(초): 도루는 포수가 받은 순간까지, 타격(히트 앤드 런)은 맞힌 순간까지
+        run = e.steal && e.pitch && !bb.foul && !bb.pick && e.mode !== `DEMO` ? Object.fromEntries(Object.entries(e.steal).map(([b, at]) => [b, ((bb.steal ? e.pitch.dur : e.pitch.elapsed) - at) / 1e3])) : null,
+        P = BB_SIM.start(bb, { bases: [...e.baseStatus], outs: e.outs, diff: e.difficulty, leads: e.mode === `DEMO` ? null : e.leads, steal: run, ...(e.mode === `DEMO` ? e.demoSim : e.align ? { fielders: bbAlign(e.align) } : null) }),
         ball = t.current,
         shadow = i.current.__shadow,
         SPEED = 2,
@@ -534,7 +537,7 @@ function b() {
         },
         next = (ms) =>
           S(() => {
-            (re(), (e.fieldView = `top-down-view`), T(), oe() || S(ae, 400));
+            (re(), (e.fieldView = `top-down-view`), T(), oe() || (after ? after() : S(ae, 400)));
           }, ms),
         finish = () => {
           ((d.current &&= (clearInterval(d.current), null)), draw());
@@ -560,8 +563,7 @@ function b() {
           ((e.outs += sim.outsAdded),
             (e.totalScore += sim.runs),
             (e.baseStatus = e.outs >= 3 ? [!1, !1, !1] : sim.newBases),
-            (e.strikes = 0),
-            (e.balls = 0),
+            sim.runnerOnly || ((e.strikes = 0), (e.balls = 0)), // 도루·런다운은 볼카운트·타자 그대로
             E(sim.display, sim.color || `#c0392b`),
             (e.statusText = sim.status),
             sim.distance != null && (e.distanceText = `${sim.distance} m`),
@@ -569,11 +571,11 @@ function b() {
               batter: e.batterNumber,
               team: e.bat,
               hitType: sim.label,
-              rbis: sim.runs,
+              rbis: sim.runnerOnly ? 0 : sim.runs,
               scoreAfter: e.totalScore,
               time: Date.now(),
             }),
-            l(),
+            sim.runnerOnly || l(),
             T());
           // DEMO: 다음 투구 대신 결과·해설
           if (e.mode === `DEMO`) return void S(() => ((e.demo.phase = `result`), T()), 1200);
@@ -581,7 +583,11 @@ function b() {
         };
       ((e.stealWindow = !1),
         (e.fieldView = `top-down-view`),
-        (e.statusText = bb.foul
+        (e.statusText = bb.steal
+          ? `도루! 포수 송구${e.bat !== e.cpu ? ` · → 진루 / ← 귀루` : ``}`
+          : bb.pick
+            ? `런다운!${e.bat !== e.cpu ? ` → 진루 / ← 귀루` : ``}`
+            : bb.foul
           ? `파울 타구`
           : P.homeRun
             ? `큰 타구! 넘어가나…`
@@ -728,7 +734,9 @@ function b() {
         hbp && ((e.hbp = !0), (e.balls = 4), (e.swingFeedback = { text: `몸에 맞는 공`, color: `#e67e22` })),
         (e.fieldView = `catcher-view`),
         T());
-      let go = () => oe() || S(ae, 1200);
+      // 도루 스타트한 주자가 있으면 포수가 받아 송구 (볼넷·폭투면 그대로 진루 처리. 삼진이어도 2아웃까지는 도루 플레이)
+      let stl = e.steal && e.balls < 4 && !wild,
+        go = () => oe() || (stl ? S(() => pb({ steal: !0 }), 250) : S(ae, 1200));
       // 3스트라이크를 놓치면 낫아웃(1루가 비었거나 2아웃일 때만 타자가 뜀), 그 밖에는 주자가 있을 때 폭투·포일
       wild && e.strikes >= 3 && (!e.baseStatus[0] || e.outs === 2)
         ? dropped3(wild, go)
@@ -836,72 +844,6 @@ function b() {
           }, 1100);
         }, 30);
     },
-    // 런다운: b루와 다음 루 사이에 걸린 주자. 수비 둘이 공을 주고받으며 좁혀 오고,
-    // 마지막에 주자가 고른 쪽(←/→)으로 슬라이딩. 수비가 대부분 이김
-    rundown = (b, done) => {
-      let e = o.current,
-        nb = b + 1,
-        el = a.current[`runner-${b}`],
-        ball = t.current,
-        P0 = v[b],
-        P1 = v[nb],
-        FK = { 1: `inf-1b`, 2: `inf-ss`, 3: `inf-3b`, 4: `catcher` },
-        f0 = i.current[FK[b]],
-        f1 = i.current[FK[nb]],
-        at = (k) => ({ bottom: P0.bottom + (P1.bottom - P0.bottom) * k, left: P0.left + (P1.left - P0.left) * k }),
-        put = (node, q) => node && ((node.style.bottom = q.bottom + `px`), (node.style.left = q.left + `%`)),
-        bp = { ...at(0.15) },
-        tick = 0,
-        END = 60, // 45ms × 60 ≈ 2.7초
-        hard = e.difficulty === `HARD`;
-      ((e.isPitched = !0),
-        (e.playballDisabled = !0),
-        (e.swingDisabled = !0),
-        (e.stealWindow = !1),
-        (e.awaitPitch = !1),
-        (e.fieldView = `top-down-view`),
-        ie(),
-        (e.rundown = { b, go: `advance` }),
-        (e.statusText = `런다운! ← 귀루 / → 진루 (마지막에 고른 쪽으로 슬라이딩)`),
-        el && (el.style.display = `flex`),
-        ball && ((ball.style.display = `block`), (ball.style.transform = `translateX(-50%) translateZ(10px) rotateX(-90deg)`)),
-        T());
-      d.current = setInterval(() => {
-        if (e.paused) return;
-        tick++;
-        let goK = e.rundown.go === `advance` ? 1 : 0,
-          slide = tick > END - 12,
-          rk = slide ? 0.5 + (goK - 0.5) * ((tick - (END - 12)) / 12) : 0.5 + 0.28 * Math.sin(tick * 0.22),
-          q0 = at(Math.max(0, rk - (slide ? 0.05 : 0.22))),
-          q1 = at(Math.min(1, rk + (slide ? 0.05 : 0.22))),
-          tgt = slide ? (goK ? q1 : q0) : Math.floor(tick / 14) % 2 ? q1 : q0; // 공은 두 수비 사이를 오감
-        (put(el, at(rk)), put(f0, q0), put(f1, q1), (bp.bottom += (tgt.bottom - bp.bottom) * 0.35), (bp.left += (tgt.left - bp.left) * 0.35), put(ball, bp));
-        if (tick < END) return;
-        d.current &&= (clearInterval(d.current), null);
-        let safe = Math.random() < (goK ? (hard ? 0.15 : 0.3) : hard ? 0.25 : 0.4),
-          bs = [...e.baseStatus],
-          home = safe && goK && nb === 4,
-          dest = goK ? (nb === 4 ? `홈` : `${nb}루`) : `${b}루`;
-        bs[b - 1] = !1;
-        safe ? (goK ? (home ? e.totalScore++ : (bs[nb - 1] = !0)) : (bs[b - 1] = !0)) : e.outs++;
-        ((e.baseStatus = bs),
-          (e.rundown = null),
-          E(safe ? `SAFE!` : bbOut(`런다운 태그 아웃`), safe ? `#2ecc71` : `#c0392b`),
-          (e.statusText = safe ? `런다운에서 살아남아 ${dest} ${home ? `득점` : `세이프`}` : `${b}루 주자 런다운에 걸려 ${dest} 앞 태그 아웃`),
-          e.hitLog.push({
-            batter: e.batterNumber,
-            team: e.bat,
-            hitType: safe ? `런다운 후 ${dest} ${home ? `득점` : `세이프`}` : `${b}루 주자 런다운 아웃`,
-            rbis: 0,
-            scoreAfter: e.totalScore,
-            time: Date.now(),
-          }),
-          T());
-        S(() => {
-          ((e.isPitched = !1), re(), done(!safe));
-        }, 1100);
-      }, 45);
-    },
     // 컴퓨터 투수의 견제 동작: 반응 시간 안에 ←(귀루)하면 세이프, →(스타트)면 런다운,
     // 가만히 있으면 리드가 커서 가끔 견제사
     pickWarn = (b, done) => {
@@ -920,7 +862,7 @@ function b() {
         () => {
           let go = e.pickWarn?.go;
           ((e.pickWarn = null), (e.isPitched = !1));
-          go === `advance` ? rundown(b, done) : pickoff(b, done, go === `return` ? 0 : (e.difficulty === `HARD` ? 0.3 : 0.15) + 0.12 * lead(b));
+          go === `advance` ? pb({ pick: b }, done) : pickoff(b, done, go === `return` ? 0 : (e.difficulty === `HARD` ? 0.3 : 0.15) + 0.12 * lead(b));
         },
         (e.difficulty === `HARD` ? 500 : 800) - 150 * lead(b), // 리드가 넓으면 돌아갈 시간이 짧음
       );
@@ -985,6 +927,16 @@ function b() {
               (bv.marker.style.top = bbPlateY(P.zy) + `px`)),
             bbDrawBall(bv.ball, P, 0),
             (e.statusText = `투구!`),
+            // 컴퓨터 공격: 가끔 도루 (1루 → 2루 7%, 2루 → 3루 3%, 다음 루가 비었을 때). 리드가 넓을수록 견제가 유리
+            e.bat === e.cpu &&
+              e.mode !== `DEMO` &&
+              [2, 1].forEach(
+                (b) =>
+                  e.baseStatus[b - 1] &&
+                  !e.baseStatus[b] &&
+                  Math.random() < (b === 1 ? 0.07 : 0.03) &&
+                  ((e.steal = { ...e.steal, [b]: Math.random() * 120 }), (e.statusText = `${b}루 주자 도루 스타트!`)),
+              ),
             T(),
             (u.current = setInterval(() => {
               let now = performance.now();
@@ -1068,126 +1020,21 @@ function b() {
       return !e.gameOver && e.stealWindow && !e.paused;
     }, []),
     ge = (0, _.useCallback)(
-      (e) => {
-        let n = o.current;
-        if (!he()) return;
-        let r = e - 1;
-        if (!n.baseStatus[r] || (e < 3 && n.baseStatus[e])) return;
-        ((n.stealWindow = !1),
-          (n.playballDisabled = !0),
-          (n.swingDisabled = !0),
-          (n.isSwung = !0),
-          (u.current &&= (clearInterval(u.current), null)));
-        let c = Math.random() < s().steal[e] + 0.12 * lead(e),
-          early = !!n.windupTimer;
-        n.windupTimer && (n.windupTimer.cancel(), (n.windupTimer = null));
-        if (early && Math.random() < (n.difficulty === `HARD` ? 0.45 : 0.3))
-          return ((n.isSwung = !1), (n.statusText = `투수가 스타트를 알아챘다!`), rundown(e, () => oe() || S(ae, 400)));
-        ((n.fieldView = `top-down-view`),
-          (n.statusText = `${e}루 주자 도루 시도!`));
-        ie(); // 누상의 다른 주자도 필드에 표시
-        let l = `runner-${e}`,
-          f = a.current[l];
-        f &&
-          ((f.style.display = `flex`),
-          (f.style.bottom = v[e].bottom + `px`),
-          (f.style.left = v[e].left + `%`));
-        let p = t.current,
-          h = bbPx(e === 3 ? BB_MOUND : BB_FIELD_M.catcher), // 홈스틸은 투수, 도루는 포수가 송구
-          g = e + 1,
-          _ = { ...v[g] };
-        p &&
-          ((p.style.display = `block`),
-          (p.style.width = `8px`),
-          (p.style.height = `8px`),
-          (p.style.bottom = h.bottom + `px`),
-          (p.style.left = h.left + `%`),
-          (p.style.transform = `translateX(-50%) translateZ(0px) rotateX(-90deg)`));
-        let ballLerp = c ? 0.05 : 0.25, // 실패로 판정되면 공이 주자보다 먼저 도착하도록
-          b = { ...h },
-          x = 0;
-        (T(),
-          (d.current = setInterval(() => {
-            if (n.paused) return;
-            x += 0.06;
-            let t = Math.min(1, x),
-              i = v[e],
-              a = v[g];
-            (f &&
-              ((f.style.bottom = i.bottom + (a.bottom - i.bottom) * t + `px`),
-              (f.style.left = i.left + (a.left - i.left) * t + `%`)),
-              (b.bottom += (_.bottom - b.bottom) * ballLerp),
-              (b.left += (_.left - b.left) * ballLerp),
-              p &&
-                ((p.style.bottom = b.bottom + `px`),
-                (p.style.left = b.left + `%`)));
-            let o =
-                Math.hypot((b.left - _.left) * 8.5, b.bottom - _.bottom) < 8,
-              s = x >= 1;
-            if (o || s) {
-              d.current &&= (clearInterval(d.current), null);
-              let t = o && !s && !c,
-                i = [...n.baseStatus];
-              (t
-                ? ((i[r] = !1),
-                  (n.baseStatus = i),
-                  n.outs++,
-                  E(
-                    bbOut(g === 4 ? `홈스틸 실패` : `도루 실패`),
-                    `#c0392b`,
-                  ),
-                  (n.statusText =
-                    g === 4
-                      ? `홈스틸 실패! 홈에서 태그 아웃`
-                      : `${e}루 → ${g}루 도루 실패, 송구 아웃`),
-                  n.hitLog.push({
-                    batter: n.batterNumber,
-                    team: n.bat,
-                    hitType:
-                      g === 4
-                        ? `홈스틸 실패 (홈 태그 아웃)`
-                        : `${e}루 도루 실패 (${g}루 송구 아웃)`,
-                    rbis: 0,
-                    scoreAfter: n.totalScore,
-                    time: Date.now(),
-                  }))
-                : g === 4
-                  ? ((i[2] = !1),
-                    (n.totalScore += 1),
-                    (n.baseStatus = i),
-                    E(`홈스틸 성공!`, `#f1c40f`),
-                    (n.statusText = `3루 주자 홈스틸 성공 (득점)`),
-                    n.hitLog.push({
-                      batter: n.batterNumber,
-                      team: n.bat,
-                      hitType: `홈스틸 성공`,
-                      rbis: 1,
-                      scoreAfter: n.totalScore,
-                      time: Date.now(),
-                    }))
-                  : ((i[r] = !1),
-                    (i[e] = !0),
-                    (n.baseStatus = i),
-                    E(`SAFE!`, `#2ecc71`),
-                    (n.statusText = `${e}루 주자 → ${g}루 도루 성공`),
-                    n.hitLog.push({
-                      batter: n.batterNumber,
-                      team: n.bat,
-                      hitType: `${e}루 → ${g}루 도루 성공`,
-                      rbis: 0,
-                      scoreAfter: n.totalScore,
-                      time: Date.now(),
-                    })),
-                S(() => {
-                  (re(),
-                    (n.fieldView = `top-down-view`),
-                    oe() || S(ae, 400));
-                }, 1200));
-            }
-          }, 45)),
-          T());
+      (b) => {
+        let n = o.current,
+          st = n.steal || {};
+        if (!he() || !n.pitch || !n.baseStatus[b - 1] || st[b] != null) return;
+        // 다음 루에 주자가 있으면 그 주자도 뛰어야 함 (더블스틸)
+        if (b < 3 && n.baseStatus[b] && st[b + 1] == null) return;
+        let early = !!n.windupTimer;
+        // 와인드업 중에 너무 일찍 뛰면 투수가 알아채고 견제 → 런다운
+        if (early && Math.random() < (n.difficulty === `HARD` ? 0.45 : 0.3)) {
+          (n.windupTimer.cancel(), (n.windupTimer = null), (n.stealWindow = !1), (n.swingDisabled = !0), (n.isSwung = !0), (n.statusText = `투수가 스타트를 알아챘다!`), T());
+          return void S(() => pb({ pick: b }), 400);
+        }
+        ((st[b] = early ? -300 : n.pitch.elapsed), (n.steal = st), (n.statusText = `${b === 3 ? `3루 주자 홈스틸` : `${b}루 주자 도루`} 스타트!`), T());
       },
-      [he, S, T, E, oe, ae],
+      [he, S, T],
     ),
     _e = (0, _.useCallback)(() => {
       let e = o.current;
@@ -1428,6 +1275,7 @@ function b() {
       playballDisabled: j.playballDisabled || j.paused || !j.difficulty,
       fieldView: j.fieldView,
       canManualRunner: !j.gameOver && j.stealWindow && !j.paused && j.bat !== j.cpu,
+      steal: j.steal ? { ...j.steal } : null,
       paused: j.paused,
       hitLog: j.hitLog,
       batterNumber: j.batterNumber,
@@ -1994,11 +1842,13 @@ var re = {
 };
 // 주자 다이아몬드 (타격 화면 왼쪽): 베이스 위 주자를 누르면 도루 · 리드 넓게 · 리드 짧게
 var BB_LEAD_TXT = { "-1": `짧게`, 0: `보통`, 1: `넓게` };
-function RunnerDiamond({ show, bases, leads, canSteal, onSteal, onLead }) {
+function RunnerDiamond({ show, bases, leads, canSteal, onSteal, onLead, stealing }) {
   let [open, setOpen] = (0, _.useState)(0);
   if (!show) return null;
-  let sel = open && bases[open - 1] ? open : 0,
-    can = (b) => canSteal && bases[b - 1] && (b === 3 || !bases[b]);
+  let st = stealing || {},
+    sel = open && bases[open - 1] ? open : 0,
+    // 다음 루에 주자가 있어도 그 주자가 이미 뛰었으면 더블스틸 가능
+    can = (b) => canSteal && bases[b - 1] && st[b] == null && (b === 3 || !bases[b] || st[b + 1] != null);
   return (0, S.jsxs)(`div`, {
     className: `bb-rd`,
     children: [
@@ -2589,6 +2439,7 @@ function ce() {
                 canSteal: t.canManualRunner && !t.gameOver,
                 onSteal: n.advanceRunner,
                 onLead: n.setLead,
+                stealing: t.steal,
               }),
               (0, S.jsx)(te, {
                 text: t.result.text,
