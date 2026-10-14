@@ -546,7 +546,11 @@ function b() {
           e.play = null;
           for (let id of [`runner-t`, `runner-1`, `runner-2`, `runner-3`]) a.current[id]?.classList.remove(`manual`);
           if (sim.foul && !sim.foulOut) {
-            (bb.bunt && e.strikes === 2 && ((e.strikes = 3), (e.buntK = !0)), e.strikes < 2 && e.strikes++, E(`FOUL`, `#e67e22`), (e.statusText = `파울!`), T());
+            (bb.bunt && e.strikes === 2 && ((e.strikes = 3), (e.buntK = !0)),
+              e.strikes < 2 && e.strikes++,
+              e.squeeze ? E(`파울 · 스퀴즈 실패`, `#e67e22`) : E(`FOUL`, `#e67e22`),
+              (e.statusText = e.squeeze ? `번트 파울 · 스퀴즈 실패` : `파울!`),
+              T());
             if (e.mode === `DEMO`) return void S(() => ((e.demo.phase = `result`), T()), 1200);
             next(700);
             return;
@@ -557,10 +561,13 @@ function b() {
             let fix = (s) => s.replace(`${sim.runs}타점`, `${need}타점`).replace(`${sim.runs}점 득점`, `${need}점 득점`);
             sim = { ...sim, runs: need, label: fix(sim.label), display: fix(sim.display), status: fix(sim.status) };
           }
-          // 스퀴즈를 못 대서 3루 주자만 뛴 경우는 홈스틸이 아니라 스퀴즈 실패
-          if (e.squeeze && sim.runnerOnly) {
-            let fix = (s) => s && s.replace(`홈스틸`, `스퀴즈`);
-            sim = { ...sim, label: fix(sim.label), status: fix(sim.status) };
+          // 스퀴즈: 결과만 표시. 타구 판단(희생번트·내야안타·병살 등, 못 댔으면 번트 헛스윙·번트 안 댐) + 스퀴즈 성공!/실패
+          if (e.squeeze) {
+            let ok = sim.runs > 0,
+              base = sim.runnerOnly ? (e.swingMiss ? `번트 헛스윙` : `번트 안 댐`) : sim.label,
+              tag = ok ? `스퀴즈 성공!` : `스퀴즈 실패`,
+              text = `${base} · ${tag}`;
+            sim = { ...sim, label: text, status: text, display: `${tag}<br><span class="bb-out-reason">(${base})</span>`, color: ok ? `#f1c40f` : `#c0392b` };
           }
           // 점수판 H·E: 안타(홈런 포함, 실책·야수선택 출루 제외)는 공격 팀, 실책은 수비 팀
           (sim.homeRun || (sim.batterBase >= 1 && !sim.caught && !sim.error && !/야수선택/.test(sim.label))) && e.teams[e.bat].h++;
@@ -590,7 +597,7 @@ function b() {
       ((e.stealWindow = !1),
         (e.fieldView = `top-down-view`),
         (e.statusText = bb.steal
-          ? `도루! 포수 송구${e.bat !== e.cpu ? ` · → 진루 / ← 귀루` : ``}`
+          ? `${e.squeeze ? `번트 실패!` : `도루! 포수 송구`}${e.bat !== e.cpu ? ` · → 진루 / ← 귀루` : ``}`
           : bb.pick
             ? `런다운!${e.bat !== e.cpu ? ` → 진루 / ← 귀루` : ``}`
             : bb.foul
@@ -945,7 +952,7 @@ function b() {
               e.mode !== `DEMO` &&
               e.batPlan === `bunt` &&
               e.baseStatus[2] &&
-              ((e.steal = { ...e.steal, 3: 0 }), (e.squeeze = !0), (e.statusText = `스퀴즈! 3루 주자 스타트`)),
+              ((e.steal = { ...e.steal, 3: 0 }), (e.squeeze = !0)), // 알림 없이 결과만 표시
             // 컴퓨터 공격: 가끔 도루 (1루 → 2루 7%, 2루 → 3루 3%, 다음 루가 비었을 때). 리드가 넓을수록 견제가 유리
             e.bat === e.cpu &&
               e.mode !== `DEMO` &&

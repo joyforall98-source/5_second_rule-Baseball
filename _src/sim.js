@@ -407,8 +407,9 @@ var BB_SIM = (() => {
       if (r === bat) continue;
       r.forced = r.from === 1 ? !0 : r.from === 2 ? bases[0] : bases[0] && bases[1];
       if (r.stealing) continue; // 도루 스타트한 주자는 그대로 달림 (히트 앤드 런)
-      // 공이 맞을 때 주자는 리드한 자리(1·3루 2.7m, 2루 5.5m, 넓게·짧게 ±1.6m)에서 출발 (DEMO는 그대로)
-      st.demo || (r.s = r.from + (r.from === 2 ? 0.2 : 0.1) + ((st.leads || [])[r.from - 1] || 0) * 0.06);
+      // 공이 맞을 때 주자는 리드한 자리에서 출발: 1·3루 0.4m, 2루 1.1m (EASY 인플레이 타율 .33~.34에 맞춤).
+      // 번트는 대는 순간 스타트하므로 2.7m · 5.5m (넓게·짧게 ±1.6m. DEMO는 그대로)
+      st.demo || (r.s = r.from + (bb.bunt ? (r.from === 2 ? 0.2 : 0.1) : r.from === 2 ? 0.04 : 0.015) + ((st.leads || [])[r.from - 1] || 0) * 0.06);
       if (two) {
         // 2아웃: 타격과 동시에 출발
         ((r.state = `run`), (r.delay = 0.1), (r.s = st.demo ? r.from + 0.06 : r.s), (r.target = r.from + 1));
@@ -592,9 +593,9 @@ var BB_SIM = (() => {
             need = d > 45 && k >= 3 ? BB_RELAY_MARGIN : 0.05;
           if (tt + need < rt) {
             // 2아웃이면 가장 확실한 아웃, 아니면 앞선 주자(실점 방지) 우선.
-            // 단 앞 주자가 아슬아슬하면(0.25초 미만) 확실한 타자 아웃을 먼저 (그것도 없을 때만 승부, DEMO는 그대로)
+            // 단 앞 주자가 아슬아슬하면(번트 0.25초, 그 밖 0.05초 미만) 확실한 타자 아웃을 먼저 (그것도 없을 때만 승부, DEMO는 그대로)
             let twoOut = P.st.outs + P.outs.length === 2,
-              close = !P.st.demo && !twoOut && r !== bat && rt - tt < 0.25,
+              close = !P.st.demo && !twoOut && r !== bat && rt - tt < (P.bb.bunt ? 0.25 : 0.05),
               score = (twoOut ? 0 : k * 10) + (isForce(r, k) ? 5 : 0) + (rt - tt) * (twoOut ? 10 : 1) - (close ? 1000 : 0);
             (!best || score > best.score) && (best = { k, score });
           }
@@ -951,8 +952,10 @@ var BB_SIM = (() => {
       ((why = `${pos} ${bb.bunt ? `번트 뜬공` : sac ? `희생플라이` : KIND_OUT[bb.kind]}`), (label = why));
       otherOuts.length && ((why += otherOuts.some((o) => o.early) ? ` · 주자가 일찍 출발해 아웃` : ` · 더블플레이`), (label = why));
     } else if (batOut) {
+      // 번트로 타자만 아웃되고 주자가 진루(득점)하면 희생번트 (DEMO는 그대로)
+      let sacBunt = !st.demo && bb.bunt && bb.kind === `ground` && outs.length === 1 && total < 3 && P.r.some((r) => r !== bat && (r.state === `scored` || (r.state !== `out` && r.s > r.from)));
       if (bat.touched === 0)
-        ((why = bb.kind === `ground` ? `${pos} ${outs.length >= 2 ? `병살타` : `땅볼`}` : `${pos} → 1루 송구 아웃`), (label = why));
+        ((why = sacBunt ? `${pos} 희생번트` : bb.kind === `ground` ? `${pos} ${outs.length >= 2 ? `병살타` : `땅볼`}` : `${pos} → 1루 송구 아웃`), (label = why));
       else ((why = throwWhy(batOut)), (label = `${HIT[bat.touched]} → ${baseName(batOut.base)}에서 아웃`));
     } else {
       let b = bat.state === `scored` ? 4 : Math.round(bat.s),
