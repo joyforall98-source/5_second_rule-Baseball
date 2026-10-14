@@ -599,6 +599,8 @@ var BB_SIM = (() => {
         let b = P.ball,
           k = b.toBase,
           rec = P.f[b.receiver];
+        // 빠진 송구: 공은 그 자리에 멈춰 있고, 받을 선수가 달려가 주울 때까지 기다림
+        if (b.wild) return void (P.ball = { ...b, wild: !1, lie: !0, from: b.to, t0: P.t, t1: P.t + dist(rec, b.to) / rec.spd + 0.3, h: 0.1 });
         ((rec.x = b.to.x), (rec.y = b.to.y), (rec.goal = null), (rec.via = null));
         ((P.ball = { mode: `held`, x: b.to.x, y: b.to.y, h: 1.2 }), (P.holder = b.receiver), (P.holderBase = k), (P.readyAt = P.t + (k == null ? 0.3 : 0.45))); // 중계 선수는 바로 몸을 돌려 던짐
         P.assistBy = b.by; // 이 베이스에서 나오는 아웃은 송구한 선수의 보살
@@ -674,7 +676,7 @@ var BB_SIM = (() => {
           }
         } else if (b.mode === `thrown`) {
           let u = clamp((t - b.t0) / Math.max(0.01, b.t1 - b.t0), 0, 1);
-          ((b.x = b.from.x + (b.to.x - b.from.x) * u), (b.y = b.from.y + (b.to.y - b.from.y) * u), (b.h = 1.5 + 2.5 * u * (1 - u)));
+          ((b.x = b.from.x + (b.to.x - b.from.x) * u), (b.y = b.from.y + (b.to.y - b.from.y) * u), (b.h = b.lie ? 0.1 : 1.5 + 2.5 * u * (1 - u)));
           t >= b.t1 && arrive();
         } else if (b.mode === `held` && P.holder) {
           let f = P.f[P.holder];
@@ -735,11 +737,17 @@ var BB_SIM = (() => {
             ((f.goal = rp), (f.via = null), (P.holderBase = null));
             if (recK !== P.holder && dist(rp, rec) <= 2.5 + speed(r) * BB_LEG * (dist(f, rec) / c.thr + 0.05)) {
               let from = { x: f.x, y: f.y },
-                to = { x: rec.x, y: rec.y };
-              ((P.ball = { mode: `thrown`, from, to, t0: t, t1: t + dist(from, to) / c.thr + 0.05, toBase: null, receiver: recK, by: P.holder, rd: !0, x: from.x, y: from.y, h: 1.5 }),
+                to = { x: rec.x, y: rec.y },
+                // 가끔(EASY 6%, HARD 3%) 송구 실책: 공이 받을 선수 뒤로 6~10m 빠짐 → 받을 선수가 쫓아가는 사이 주자가 삶
+                wild = R() < (P.st.diff === `HARD` ? 0.03 : 0.06);
+              if (wild) {
+                let d = Math.max(1, dist(from, to)),
+                  over = rnd(6, 10);
+                ((to = { x: to.x + ((to.x - from.x) / d) * over, y: to.y + ((to.y - from.y) / d) * over }), (P.rdErr = P.holder), (rec.goal = { ...to }));
+              } else rec.goal = null;
+              ((P.ball = { mode: `thrown`, from, to, t0: t, t1: t + dist(from, to) / c.thr + 0.05, toBase: null, receiver: recK, by: P.holder, rd: !wild, wild, x: from.x, y: from.y, h: 1.5 }),
                 (f.goal = { ...BB_BASES[other] }),
-                (P.cover[other] = P.holder),
-                (rec.goal = null));
+                (P.cover[other] = P.holder));
             }
           }
         }
@@ -881,6 +889,7 @@ var BB_SIM = (() => {
       res.batterBase = b;
     }
     runs && !P.caught && (label = `${runs}타점 ` + label);
+    P.rdErr && ((res.rdErr = P.rdErr), (label += ` · 협살 중 ${BB_POS[P.rdErr]} 송구 실책`)); // 점수판 E는 app에서
     let hitText = label,
       color = why ? `#c0392b` : res.error ? `#e67e22` : /홈런/.test(label) ? `#f1c40f` : `#2ecc71`;
     return Object.assign(res, {

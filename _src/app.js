@@ -494,6 +494,7 @@ function b() {
         lastHud = 0,
         hrShown = !1,
         errShown = !1,
+        rdErrShown = !1,
         acc = 0, // 아직 진행하지 않은 시뮬레이션 시간(초)
         place = (el, x, yy) => {
           if (!el) return;
@@ -516,6 +517,12 @@ function b() {
           if (!errShown && P.ev?.error && P.t >= Math.min(P.ev.t, P.landT)) {
             errShown = !0;
             let errEl = i.current[P.ev.key];
+            errEl && (errEl.classList.add(`err`), setTimeout(() => errEl.classList.remove(`err`), 1800));
+          }
+          // 협살 중 송구 실책: 던진 선수 머리 위에 느낌표
+          if (!rdErrShown && P.rdErr) {
+            rdErrShown = !0;
+            let errEl = i.current[P.rdErr];
             errEl && (errEl.classList.add(`err`), setTimeout(() => errEl.classList.remove(`err`), 1800));
           }
           // 홈런: 담장을 넘는 순간 알리고, 주자들이 홈에 들어오는 장면은 계속 보여줌
@@ -549,6 +556,7 @@ function b() {
           // 점수판 H·E: 안타(홈런 포함, 실책·야수선택 출루 제외)는 공격 팀, 실책은 수비 팀
           (sim.homeRun || (sim.batterBase >= 1 && !sim.caught && !sim.error && !/야수선택/.test(sim.label))) && e.teams[e.bat].h++;
           sim.error && e.teams[1 - e.bat].e++;
+          sim.rdErr && e.teams[1 - e.bat].e++; // 협살 중 송구 실책
           ((e.outs += sim.outsAdded),
             (e.totalScore += sim.runs),
             (e.baseStatus = e.outs >= 3 ? [!1, !1, !1] : sim.newBases),
