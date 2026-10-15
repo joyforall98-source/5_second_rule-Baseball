@@ -417,6 +417,12 @@ var BB_SIM = (() => {
     !st.demo && OF.includes(ev.key) && (P.f[P.cover[2] === `inf-ss` ? `inf-2b` : `inf-ss`].goal = lerp(BB_BASES[2], ev.p, 0.35));
     // 투수 1루 커버: 바로 출발해 1루 앞 파울라인(4m 전)을 거쳐 선을 따라 베이스로 (DEMO는 그대로)
     !st.demo && P.cover[1] === `pitcher` && ((P.f.pitcher.startAt = c.react), (P.f.pitcher.via = { x: 16.6, y: 16.6 }));
+    // 3루 주자가 태그업할 외야 뜬공(2아웃 전): 홈 중계(왼쪽이면 3루수, 아니면 1루수)가 잡기 전에 중계 위치로. 비운 베이스는 투수
+    if (!st.demo && ev.catch && OF.includes(ev.key) && bases[2] && st.outs < 2) {
+      let key = ev.p.x < -15 ? `inf-3b` : `inf-1b`;
+      for (let j = 1; j <= 3; j++) P.cover[j] === key && ((P.cover[j] = `pitcher`), (P.f.pitcher.goal = { ...BB_BASES[j] }), (P.f.pitcher.via = null));
+      P.f[key].goal = lerp(BB_BASES[4], ev.p, 0.4);
+    }
 
     // ── 주자 출발 ──
     let two = st.outs === 2;
@@ -439,8 +445,10 @@ var BB_SIM = (() => {
         else r.s > r.from && ((r.state = `run`), (r.delay = 0.1), (r.target = r.from)); // 안 뛰는 주자는 리드에서 베이스로 돌아감
       } else {
         // 뜬공·직선타: 리드한 채로 타구를 지켜봄
+        // 실제 경기: 태그업할 만한 뜬공이면 베이스에 붙어 기다림 (3루 주자는 항상, 2루 80m·1루 100m 이상)
+        let tag = !st.demo && bb.kind === `fly` && (r.from === 3 || (r.from === 2 && bb.D >= 80) || (r.from === 1 && bb.D >= 100));
         ((r.state = `wait`),
-          (r.holdS = r.from + (bb.kind === `pop` ? 0.1 : bb.kind === `line` ? 0.06 : clamp(0.12 + (bb.D || 0) / 400, 0.12, 0.42))));
+          (r.holdS = r.from + (tag ? 0 : bb.kind === `pop` ? 0.1 : bb.kind === `line` ? 0.06 : clamp(0.12 + (bb.D || 0) / 400, 0.12, 0.42))));
       }
     }
     return wrap(P);
@@ -721,7 +729,8 @@ var BB_SIM = (() => {
             if (!r.manual && r.from < 4 && P.st.outs + P.outs.length < 3) {
               let runT = (r.s - r.from) / speed(r) + 1 / speed(r) + 0.35,
                 ballT = Math.max(0, ev.ready - P.t) + thrT(ev.p, r.from + 1);
-              runT < ballT - r.margin && (r.tagIntent = !0);
+              // 득점이 걸린 3루 주자는 과감하게(여유 -0.2~0.5초): 아슬아슬해도 홈으로 → 가끔 홈 보살 (DEMO는 그대로)
+              runT < ballT - (r.from === 3 && !P.st.demo ? rnd(-0.2, 0.5) : r.margin) && (r.tagIntent = !0);
             }
             !r.retouch && r.tagIntent && ((r.tagIntent = !1), setTarget(r, r.from + 1), (r.delay = 0.25));
           }
