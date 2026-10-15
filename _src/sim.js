@@ -502,15 +502,20 @@ var BB_SIM = (() => {
         if (key === P.holder) return 0;
         return Math.max(0, f.startAt - P.t) + (f.via ? dist(f, f.via) + dist(f.via, B) : dist(f, B)) / f.spd;
       },
+      // 공을 쥔 선수가 베이스 k로 보내는 송구: 받을 선수, 날아가는 시간, 던지기 전 기다리는 시간
+      throwPlan = (k, carry) => {
+        let h = P.f[P.holder],
+          d = dist(h, BB_BASES[k]),
+          tt = carry || d < 7 ? d / c.ifSpd + 0.1 : thrT(h, k), // 가까우면 직접 들고 뛰어감
+          rec = carry || P.cover[k] === P.holder || (!P.st.demo && d < 7) ? P.holder : P.cover[k];
+        // 받을 선수가 아직 오는 중이면 기다렸다가, 베이스에 닿는 순간 공이 도착하게 던짐 (DEMO는 그대로)
+        return { tt, rec, wait: !P.st.demo && rec !== P.holder ? Math.max(0, recvT(k) - tt) : 0 };
+      },
       throwTo = (k, carry) => {
         let h = P.f[P.holder],
           from = { x: h.x, y: h.y },
           to = BB_BASES[k],
-          d = dist(from, to),
-          tt = carry || d < 7 ? d / c.ifSpd + 0.1 : thrT(from, k), // 가까우면 직접 들고 뛰어감
-          rec = carry || P.cover[k] === P.holder || (!P.st.demo && d < 7) ? P.holder : P.cover[k],
-          // 받을 선수가 아직 오는 중이면 기다렸다가, 베이스에 닿는 순간 공이 도착하게 던짐 (DEMO는 그대로)
-          wait = !P.st.demo && rec !== P.holder ? Math.max(0, recvT(k) - tt) : 0;
+          { tt, rec, wait } = throwPlan(k, carry);
         ((P.ball = { mode: `thrown`, from, to, t0: P.t + wait, t1: P.t + wait + tt, toBase: k, receiver: rec, by: P.holder, x: from.x, y: from.y, h: 1.5 }),
           (P.holderBase = null),
           P.throws++,
@@ -553,9 +558,9 @@ var BB_SIM = (() => {
       // 송구 후보들(앞쪽이 기본) 중 주자를 가장 덜 보내는 것. 같으면 앞쪽
       leastAdv = (opts) => opts.reduce((a, o) => ((o.cost = adv(o.tb)), !a || o.cost < a.cost ? o : a), null),
       // 공을 베이스 k로 직접 던졌을 때의 tb (받을 선수가 늦으면 기다렸다 던짐)
-      tbThrow = (h, k, ready) => {
-        let d = dist(h, BB_BASES[k]),
-          T = ready + Math.max(d < 7 ? d / c.ifSpd + 0.1 : thrT(h, k), recvT(k));
+      tbThrow = (k, ready) => {
+        let { tt, wait } = throwPlan(k),
+          T = ready + tt + wait;
         return (j) => (j === k ? T : T + 0.45 + thrT(BB_BASES[k], j));
       },
       // 외야수의 송구 (DEMO 제외): 잡을 수 있으면 그 베이스로, 아니면 주자를 가장 덜 보내는 쪽으로 던짐
@@ -585,7 +590,7 @@ var BB_SIM = (() => {
             k0 = Math.min(4, b + 1),
             // 중계면 공은 중계 지점(베이스에서 40%)에 먼저 가고, 중계 선수가 어디로든 이어 던질 수 있음
             opt = (k) => {
-              if (!via(k)) return { k, tb: tbThrow(h, k, 0) };
+              if (!via(k)) return { k, tb: tbThrow(k, 0) };
               let cp = lerp(BB_BASES[k], h, 0.4),
                 T = dist(h, cp) / c.thr + 0.3;
               return { k, tb: (j) => T + thrT(cp, j) };
@@ -643,7 +648,7 @@ var BB_SIM = (() => {
         if (!P.st.demo) {
           if (!P.r.some((r) => live(r) && r.state === `run` && r.target > r.s)) return !1;
           let ready = Math.max(0, P.readyAt - P.t),
-            o = leastAdv([{ k: 0, tb: (j) => ready + thrT(h, j) }, ...[1, 2, 3, 4].filter((k) => k !== P.holderBase).map((k) => ({ k, tb: tbThrow(h, k, ready) }))]);
+            o = leastAdv([{ k: 0, tb: (j) => ready + thrT(h, j) }, ...[1, 2, 3, 4].filter((k) => k !== P.holderBase).map((k) => ({ k, tb: tbThrow(k, ready) }))]);
           return o.k ? (throwTo(o.k), !0) : !1;
         }
         // 잡을 수 없으면: 달리는 주자가 더 못 가도록 맨 뒤 주자의 다음 베이스로

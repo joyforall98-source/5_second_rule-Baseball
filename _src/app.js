@@ -1,6 +1,9 @@
 // 필드 화면 위치(px)는 sim.js의 실제 치수(m)에서 계산: v = 베이스(0 홈 ~ 4 홈), y = 수비 위치
 var v = Object.fromEntries(BB_BASES.map((b, i) => [i, bbPx(b)])),
-  y = Object.fromEntries(Object.entries(BB_FIELD_M).map(([k, m]) => [k, bbPx(m)]));
+  y = Object.fromEntries(Object.entries(BB_FIELD_M).map(([k, m]) => [k, bbPx(m)])),
+  // 두 화면 위치 p→q 사이 k(0~1) 지점, 요소를 그 위치에 놓기
+  bbMix = (p, q, k) => ({ bottom: p.bottom + (q.bottom - p.bottom) * k, left: p.left + (q.left - p.left) * k }),
+  bbPut = (el, q) => el && ((el.style.bottom = q.bottom + `px`), (el.style.left = q.left + `%`));
 // 위에서 본 경기장 (필드 850×580px, 1m = BB_K px). 펜스·파울폴·내야를 실제 비율로 그림
 var BB_FIELD_SVG = (() => {
   let P = (m) => [425 + m.x * BB_K, 560 - m.y * BB_K],
@@ -651,8 +654,6 @@ function b() {
         from = at ? at.from : bbPx(BB_FIELD_M.catcher),
         to = at ? at.to : bbPx({ x: bbRand(-10, 10), y: -12 }),
         occ = [3, 2, 1].filter((b) => e.baseStatus[b - 1]),
-        mix = (p, q, k) => ({ bottom: p.bottom + (q.bottom - p.bottom) * k, left: p.left + (q.left - p.left) * k }),
-        put = (el, q) => el && ((el.style.bottom = q.bottom + `px`), (el.style.left = q.left + `%`)),
         f = 0;
       ((e.fieldView = `top-down-view`),
         (e.statusText = kind === `폭투` ? `폭투! 공이 뒤로 빠졌다` : kind === `포일` ? `포일! 포수가 공을 놓쳤다` : `${kind}! 공이 빠졌다`),
@@ -663,8 +664,8 @@ function b() {
       d.current = setInterval(() => {
         if (e.paused) return;
         f = Math.min(1, f + 0.03);
-        (put(ball, mix(from, to, Math.min(1, f * 1.6))), put(cat, mix(from, to, Math.max(0, f - 0.25)))); // 공이 굴러가고 포수가 쫓아감
-        for (let b of occ) put(a.current[`runner-${b}`], mix(v[b], v[b + 1], f));
+        (bbPut(ball, bbMix(from, to, Math.min(1, f * 1.6))), bbPut(cat, bbMix(from, to, Math.max(0, f - 0.25)))); // 공이 굴러가고 포수가 쫓아감
+        for (let b of occ) bbPut(a.current[`runner-${b}`], bbMix(v[b], v[b + 1], f));
         if (f < 1) return;
         d.current &&= (clearInterval(d.current), null);
         let bs = e.baseStatus,
@@ -696,14 +697,12 @@ function b() {
         safe = batT < catT,
         end = Math.min(catT, batT) + 0.3,
         occ = [3, 2, 1].filter((b) => e.baseStatus[b - 1]),
-        mix = (p, q, k) => ({ bottom: p.bottom + (q.bottom - p.bottom) * k, left: p.left + (q.left - p.left) * k }),
-        put = (el, q) => el && ((el.style.bottom = q.bottom + `px`), (el.style.left = q.left + `%`)),
         tt = 0;
       ((e.fieldView = `top-down-view`),
         (e.statusText = `낫아웃! 포수가 공을 놓쳤다 · 타자 1루로!`),
         E(`낫아웃!`, `#e67e22`),
         ie(),
-        bat && ((bat.style.display = `flex`), put(bat, v[0])),
+        bat && ((bat.style.display = `flex`), bbPut(bat, v[0])),
         ball && ((ball.style.display = `block`), (ball.style.transform = `translateX(-50%) translateZ(4px) rotateX(-90deg)`)),
         T());
       d.current = setInterval(() => {
@@ -711,10 +710,10 @@ function b() {
         tt += 0.03 * 1.6; // 1.6배속
         let k = Math.min(1, tt / end);
         // 공: 뒤로 굴러감 → 포수가 주워 1루로 송구
-        put(ball, tt < pickT + 0.5 ? mix(from, sp, Math.min(1, tt / 0.7)) : mix(sp, first, Math.min(1, (tt - pickT - 0.5) / throwT)));
-        put(cat, mix(from, sp, Math.min(1, tt / pickT)));
-        put(bat, mix(v[0], first, Math.min(1, Math.max(0, tt - 0.6) / (batT - 0.6))));
-        for (let b of occ) put(a.current[`runner-${b}`], mix(v[b], v[b + 1], k));
+        bbPut(ball, tt < pickT + 0.5 ? bbMix(from, sp, Math.min(1, tt / 0.7)) : bbMix(sp, first, Math.min(1, (tt - pickT - 0.5) / throwT)));
+        bbPut(cat, bbMix(from, sp, Math.min(1, tt / pickT)));
+        bbPut(bat, bbMix(v[0], first, Math.min(1, Math.max(0, tt - 0.6) / (batT - 0.6))));
+        for (let b of occ) bbPut(a.current[`runner-${b}`], bbMix(v[b], v[b + 1], k));
         if (tt < end) return;
         d.current &&= (clearInterval(d.current), null);
         let bs = e.baseStatus,
@@ -857,7 +856,7 @@ function b() {
           fe = i.current[FK[b]],
           fFrom = { ...y[FK[b]] },
           rEl = a.current[`runner-${b}`],
-          rFrom = ((p, q, k) => ({ bottom: p.bottom + (q.bottom - p.bottom) * k, left: p.left + (q.left - p.left) * k }))(v[b], v[b + 1] || v[0], 0.12 + 0.06 * lead(b)),
+          rFrom = bbMix(v[b], v[b + 1], 0.12 + 0.06 * lead(b)),
           f = 0;
       pn[b - 1]++;
       e.bat === e.cpu && ((e.leads ||= [0, 0, 0])[b - 1] = Math.max(-1, lead(b) - 1)); // 견제를 받은 컴퓨터 주자는 리드를 줄임
@@ -871,14 +870,13 @@ function b() {
           ie(),
           ball && ((ball.style.display = `block`), (ball.style.transform = `translateX(-50%) translateZ(6px) rotateX(-90deg)`)),
           T());
-        let put = (el, p, q, k) => el && ((el.style.bottom = p.bottom + (q.bottom - p.bottom) * k + `px`), (el.style.left = p.left + (q.left - p.left) * k + `%`));
-        (put(rEl, rFrom, rFrom, 0), put(fe, fFrom, fFrom, 0));
+        (bbPut(rEl, rFrom), bbPut(fe, fFrom));
         d.current = setInterval(() => {
           if (e.paused) return;
           f = Math.min(1, f + 0.07);
-          put(ball, from, to, f);
-          put(fe, fFrom, to, Math.min(1, f * 1.6)); // 수비수가 먼저 베이스에 들어감
-          put(rEl, rFrom, to, out ? Math.min(0.85, f) : Math.min(1, f * 1.15)); // 견제사면 베이스에 닿기 전에 태그
+          bbPut(ball, bbMix(from, to, f));
+          bbPut(fe, bbMix(fFrom, to, Math.min(1, f * 1.6))); // 수비수가 먼저 베이스에 들어감
+          bbPut(rEl, bbMix(rFrom, to, out ? Math.min(0.85, f) : Math.min(1, f * 1.15))); // 견제사면 베이스에 닿기 전에 태그
           if (f < 1) return;
           d.current &&= (clearInterval(d.current), null);
           // 악송구: 공이 베이스 뒤로 빠지고 받던 수비수가 쫓는 사이 누상 주자 모두 한 베이스씩 (수비 실책)
