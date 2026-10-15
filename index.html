@@ -2335,8 +2335,13 @@ function b() {
     ae = (0, _.useCallback)(() => {
       ne();
       let e = o.current,
-        key = e.baseStatus.join();
-      e.leadKey !== key && ((e.leads = [0, 0, 0]), (e.leadKey = key));
+        key = e.baseStatus.join(),
+        bk = `${e.bat}-${e.batterNumber}`,
+        cpuBat = e.mode !== `DEMO` && e.bat === e.cpu;
+      // 리드·견제 횟수: 누상이 바뀌면 초기화. 컴퓨터 주자는 누상이 바뀌거나 새 타석마다 리드를 무작위(짧게 25 · 보통 50 · 넓게 25%)로
+      e.leadKey !== key && ((e.leads = [0, 0, 0]), (e.pickN = [0, 0, 0]), (e.leadKey = key));
+      e.leadBat !== bk && ((e.pickN = [0, 0, 0]), (e.leadBat = bk), (e.leadRoll = null)); // 견제 횟수는 타석마다
+      cpuBat && e.leadRoll !== key + bk && ((e.leads = e.baseStatus.map((on) => (on ? [-1, 0, 0, 1][Math.floor(Math.random() * 4)] : 0))), (e.leadRoll = key + bk));
       ((e.fieldView = `catcher-view`),
         (e.playballDisabled = humanDef()),
         (e.swingDisabled = !0),
@@ -2645,18 +2650,19 @@ function b() {
     },
     // 투구가 포수 미트에 들어간 뒤의 판정 (지켜봄 또는 헛스윙)
     // 폭투·포일: 포수가 공을 놓쳐 뒤로 빠지면 누상 주자가 한 베이스씩 진루 (3루 주자는 득점)
-    wildPitch = (kind, done) => {
+    // at = { from, to, chaser }: 견제 악송구처럼 다른 곳에서 빠진 공 (공이 굴러간 길, 쫓아가는 수비수)
+    wildPitch = (kind, done, at) => {
       let e = o.current,
         ball = t.current,
-        cat = i.current.catcher,
-        from = bbPx(BB_FIELD_M.catcher),
-        to = bbPx({ x: bbRand(-10, 10), y: -12 }),
+        cat = i.current[at ? at.chaser : `catcher`],
+        from = at ? at.from : bbPx(BB_FIELD_M.catcher),
+        to = at ? at.to : bbPx({ x: bbRand(-10, 10), y: -12 }),
         occ = [3, 2, 1].filter((b) => e.baseStatus[b - 1]),
         mix = (p, q, k) => ({ bottom: p.bottom + (q.bottom - p.bottom) * k, left: p.left + (q.left - p.left) * k }),
         put = (el, q) => el && ((el.style.bottom = q.bottom + `px`), (el.style.left = q.left + `%`)),
         f = 0;
       ((e.fieldView = `top-down-view`),
-        (e.statusText = kind === `폭투` ? `폭투! 공이 뒤로 빠졌다` : `포일! 포수가 공을 놓쳤다`),
+        (e.statusText = kind === `폭투` ? `폭투! 공이 뒤로 빠졌다` : kind === `포일` ? `포일! 포수가 공을 놓쳤다` : `${kind}! 공이 빠졌다`),
         E(kind, `#e67e22`),
         ie(),
         ball && ((ball.style.display = `block`), (ball.style.transform = `translateX(-50%) translateZ(4px) rotateX(-90deg)`)),
@@ -2841,13 +2847,27 @@ function b() {
         }, 450));
     }, [S, T]),
     // 견제: b루로 던져 견제사 또는 세이프. 끝나면 done(out)
+    // pOut 없음 = 사람 투수의 견제: EASY 6% · HARD 12%, 주자 리드 한 칸마다 ±6%p.
+    // 같은 타석에서 같은 루를 다시 견제할수록 절반씩 (주자가 경계함). 견제사가 아니면 가끔 악송구(EASY 3% · HARD 2%)
     pickoff = (b, done, pOut) => {
       let e = o.current,
-          out = Math.random() < (pOut ?? (e.difficulty === `HARD` ? 0.12 : 0.06)),
+          hard = e.difficulty === `HARD`,
+          pn = (e.pickN ||= [0, 0, 0]),
+          base = pOut ?? Math.max(0, (hard ? 0.12 : 0.06) + 0.06 * lead(b)),
+          out = Math.random() < base * 0.5 ** pn[b - 1],
+          wild = !out && Math.random() < (hard ? 0.02 : 0.03),
           ball = t.current,
           from = bbPx(BB_MOUND),
           to = v[b],
+          // 받는 수비수(1루수 · 2루는 유격수 · 3루수)가 베이스로, 주자는 리드한 자리에서 몸을 날려 귀루
+          FK = { 1: `inf-1b`, 2: `inf-ss`, 3: `inf-3b` },
+          fe = i.current[FK[b]],
+          fFrom = { ...y[FK[b]] },
+          rEl = a.current[`runner-${b}`],
+          rFrom = ((p, q, k) => ({ bottom: p.bottom + (q.bottom - p.bottom) * k, left: p.left + (q.left - p.left) * k }))(v[b], v[b + 1] || v[0], 0.12 + 0.06 * lead(b)),
           f = 0;
+      pn[b - 1]++;
+      e.bat === e.cpu && ((e.leads ||= [0, 0, 0])[b - 1] = Math.max(-1, lead(b) - 1)); // 견제를 받은 컴퓨터 주자는 리드를 줄임
         ((e.isPitched = !0),
           (e.playballDisabled = !0),
           (e.swingDisabled = !0),
@@ -2858,12 +2878,24 @@ function b() {
           ie(),
           ball && ((ball.style.display = `block`), (ball.style.transform = `translateX(-50%) translateZ(6px) rotateX(-90deg)`)),
           T());
+        let put = (el, p, q, k) => el && ((el.style.bottom = p.bottom + (q.bottom - p.bottom) * k + `px`), (el.style.left = p.left + (q.left - p.left) * k + `%`));
+        (put(rEl, rFrom, rFrom, 0), put(fe, fFrom, fFrom, 0));
         d.current = setInterval(() => {
           if (e.paused) return;
           f = Math.min(1, f + 0.07);
-          ball && ((ball.style.bottom = from.bottom + (to.bottom - from.bottom) * f + `px`), (ball.style.left = from.left + (to.left - from.left) * f + `%`));
+          put(ball, from, to, f);
+          put(fe, fFrom, to, Math.min(1, f * 1.6)); // 수비수가 먼저 베이스에 들어감
+          put(rEl, rFrom, to, out ? Math.min(0.85, f) : Math.min(1, f * 1.15)); // 견제사면 베이스에 닿기 전에 태그
           if (f < 1) return;
           d.current &&= (clearInterval(d.current), null);
+          // 악송구: 공이 베이스 뒤로 빠지고 받던 수비수가 쫓는 사이 누상 주자 모두 한 베이스씩 (수비 실책)
+          if (wild) {
+            let B = BB_BASES[b];
+            return (
+              e.teams[1 - e.bat] && e.teams[1 - e.bat].e++,
+              wildPitch(`견제 악송구`, () => ((e.isPitched = !1), done(!1)), { from: to, to: bbPx({ x: B.x * 1.45, y: B.y * 1.45 }), chaser: FK[b] })
+            );
+          }
           if (out) {
             let bs = [...e.baseStatus];
             ((bs[b - 1] = !1), (e.baseStatus = bs), e.outs++, E(bbOut(`${b}루 견제사`), `#c0392b`), (e.statusText = `${b}루 주자 견제사!`));
@@ -2904,11 +2936,12 @@ function b() {
       humanDef() || (e.autoPlay = !0); // 컴퓨터 투구를 한 번 시작하면 자동 진행
       // 컴퓨터 수비: 주자가 있으면 가끔 견제. 끝나면 원래 투구를 그대로 던짐 (견제사로 3아웃이면 공수 교대)
       let occ = [1, 2, 3].filter((b) => e.baseStatus[b - 1]),
-        wide = occ.filter((b) => lead(b) > 0),
         big = Math.max(-1, ...occ.map(lead));
       if (!e.noPick && !humanDef() && occ.length && Math.random() < 0.18 * (1 + 0.6 * big)) {
-        // 리드를 넓게 잡은 주자에게 먼저, 아니면 대부분 1루
-        let b = wide.length ? wide[0] : occ[0] === 1 && Math.random() < 0.75 ? 1 : occ[Math.floor(Math.random() * occ.length)];
+        // 대상: 1루 1 · 2루 0.4 · 3루 0.1 비율에, 리드가 넓으면 ×2 · 짧으면 ×0.5 (1루 주자 위주, 3루 견제는 드물게)
+        let w = occ.map((b) => [1, 0.4, 0.1][b - 1] * 2 ** lead(b)),
+          x = Math.random() * w.reduce((s, q) => s + q, 0),
+          b = occ.find((_, j) => (x -= w[j]) < 0) ?? occ[0];
         return pickWarn(b, () => oe() || ((e.noPick = !0), A()));
       }
       e.noPick = !1;
@@ -2971,7 +3004,7 @@ function b() {
                 (b) =>
                   e.baseStatus[b - 1] &&
                   !e.baseStatus[b] &&
-                  Math.random() < (b === 1 ? 0.07 : 0.03) &&
+                  Math.random() < (b === 1 ? 0.07 : 0.03) * (1 + 0.8 * lead(b)) && // 리드가 넓으면 더 자주, 짧으면 거의 안 함
                   ((e.steal = { ...e.steal, [b]: Math.random() * 120 }), (e.statusText = `${b}루 주자 도루 스타트!`)),
               ),
             T(),
@@ -3817,7 +3850,7 @@ function RunnerAlert({ alert, onGo }) {
   });
 }
 // 수비 투구 선택: 구종 버튼 + 존 주변 클릭으로 도달 지점
-function PitchPrompt({ show, sel, defName, onPick, bases, onPickoff, align, onAlign }) {
+function PitchPrompt({ show, sel, defName, onPick, bases, leads, onPickoff, align, onAlign }) {
   return show
     ? (0, S.jsxs)(`div`, {
         className: `bb-pitchprompt`,
@@ -3838,7 +3871,7 @@ function PitchPrompt({ show, sel, defName, onPick, bases, onPickoff, align, onAl
           bases.some(Boolean) &&
             (0, S.jsx)(`div`, {
               className: `bb-pitchprompt-types pick`,
-              children: [1, 2, 3].map((b) => bases[b - 1] && (0, S.jsx)(`button`, { onClick: () => onPickoff(b), children: `⇧${b} ${b}루 견제` }, b)),
+              children: [1, 2, 3].map((b) => bases[b - 1] && (0, S.jsx)(`button`, { onClick: () => onPickoff(b), children: `⇧${b} ${b}루 견제${(leads || [])[b - 1] > 0 ? ` · 리드 넓음 »` : (leads || [])[b - 1] < 0 ? ` · 리드 짧음 «` : ``}` }, b)), // 주자 리드를 보고 견제
             }),
         ],
       })
@@ -4445,6 +4478,7 @@ function ce() {
                 onPick: n.pickPitch,
                 bases: t.baseStatus,
                 onPickoff: n.pickBase,
+                leads: t.leads,
                 align: t.mode === `2P` ? t.align || `기본` : null,
                 onAlign: n.setAlign,
               }),
