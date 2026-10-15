@@ -534,8 +534,31 @@ var BB_SIM = (() => {
           (P.f[key].goal = { ...to }));
         for (let r of P.r) live(r) && r.state === `safe` && decide(r);
       },
-      // 외야수의 송구 (DEMO 제외): 접전이면 그 베이스로, 아니면 맨 뒤 주자가 노릴 다음 베이스로 던져 묶음.
-      // 45m 넘으면 중계 선수를 거침 → 중계 선수가 받아서 다시 판단(이어 던지거나 끊고 다른 베이스로)
+      // 아무도 잡을 수 없을 때 쓰는 어림: 공이 베이스 j에 닿는 시각 tb(j)가 이렇다면 주자들이 지금 가려는 베이스보다
+      // 몇 베이스를 더 가는지 (득점은 0.5 더). 앞 주자부터, 앞 주자를 앞지르지 않게. 플레이어가 지시한 주자는 그대로
+      adv = (tb) => {
+        let cost = 0,
+          leadK = 5;
+        for (let r of P.r) {
+          if (!live(r)) continue;
+          let cur = r.state === `run` && r.target > r.s ? r.target : Math.max(r.touched, Math.floor(r.s + 1e-6)),
+            lim = leadK >= 4 ? 4 : leadK - 1,
+            k = cur;
+          if (!r.manual) while (k + 1 <= lim && runnerTime(r, k + 1) < tb(k + 1) - r.margin) k++;
+          ((cost += k - cur + (k === 4 && cur < 4 ? 0.5 : 0)), (leadK = k));
+        }
+        return cost;
+      },
+      // 송구 후보들(앞쪽이 기본) 중 주자를 가장 덜 보내는 것. 같으면 앞쪽
+      leastAdv = (opts) => opts.reduce((a, o) => ((o.cost = adv(o.tb)), !a || o.cost < a.cost ? o : a), null),
+      // 공을 베이스 k로 직접 던졌을 때의 tb (받을 선수가 늦으면 기다렸다 던짐)
+      tbThrow = (h, k, ready) => {
+        let d = dist(h, BB_BASES[k]),
+          T = ready + Math.max(d < 7 ? d / c.ifSpd + 0.1 : thrT(h, k), recvT(k));
+        return (j) => (j === k ? T : T + 0.45 + thrT(BB_BASES[k], j));
+      },
+      // 외야수의 송구 (DEMO 제외): 잡을 수 있으면 그 베이스로, 아니면 주자를 가장 덜 보내는 쪽으로 던짐
+      // (기본은 맨 뒤 주자가 노릴 다음 베이스). 45m 넘으면 중계 선수를 거침 → 중계 선수가 받아서 다시 판단
       ofDefense = () => {
         let h = P.f[P.holder],
           via = (k) => dist(h, BB_BASES[k]) > 45,
@@ -546,8 +569,8 @@ var BB_SIM = (() => {
           let k = r.target,
             tt = tOf(k),
             rt = runnerTime(r, k);
-          // 중계를 거치면 조금(0.3초) 늦어도 승부 (늦으면 중계 선수가 끊음)
-          if (tt + 0.05 < rt || (via(k) && tt < rt + 0.3)) {
+          // 중계 시간까지 넣어 확실히 잡을 수 있을 때만 승부 (늦은 승부 송구는 그 틈에 뒤 주자들이 진루함)
+          if (tt + 0.05 < rt) {
             let twoOut = P.st.outs + P.outs.length === 2,
               score = (twoOut ? 0 : k * 10) + (isForce(r, k) ? 5 : 0) + (rt - tt) * (twoOut ? 10 : 1);
             (!best || score > best.score) && (best = { k, score });
@@ -557,8 +580,16 @@ var BB_SIM = (() => {
         if (!k) {
           if (!P.r.some((r) => live(r) && r.state === `run` && r.target > r.s)) return !1;
           let tr = P.r.filter(live).pop(),
-            b = tr.state === `run` && tr.target > tr.s ? tr.target : Math.floor(tr.s + 1e-6);
-          k = Math.min(4, b + 1);
+            b = tr.state === `run` && tr.target > tr.s ? tr.target : Math.floor(tr.s + 1e-6),
+            k0 = Math.min(4, b + 1),
+            // 중계면 공은 중계 지점(베이스에서 40%)에 먼저 가고, 중계 선수가 어디로든 이어 던질 수 있음
+            opt = (k) => {
+              if (!via(k)) return { k, tb: tbThrow(h, k, 0) };
+              let cp = lerp(BB_BASES[k], h, 0.4),
+                T = dist(h, cp) / c.thr + 0.3;
+              return { k, tb: (j) => T + thrT(cp, j) };
+            };
+          k = leastAdv([k0, 1, 2, 3, 4].filter((x, i, a) => a.indexOf(x) === i).map(opt)).k;
         }
         return (via(k) ? cutTo(k) : throwTo(k), !0);
       },
@@ -567,16 +598,18 @@ var BB_SIM = (() => {
         if (P.throws >= 6) return !1;
         let ft = P.st.firstThrow;
         if (ft && !P.throws) return (throwTo(ft.base, ft.carry), !0); // DEMO: 정해진 첫 송구
+        // 달려오는 주자가 곧 손 닿을 거리면 던지지 않고 태그하러 감 (실제 경기만. 아래에서 더 앞선 주자를 잡을 송구가 없을 때)
+        let lunge = null,
+          doLunge = () => ((lunge.f.goal = lunge.p), (lunge.f.via = null), (P.holderBase = null), !0);
         if (!P.st.demo) {
           if (P.rd) return !0; // 협살 중 (tick에서 처리)
-          // 달려오는 주자가 곧 손 닿을 거리면 던지지 않고 태그하러 감
           let f = P.f[P.holder];
           for (let r of P.r)
-            if (live(r) && r.state === `run` && !r.trot && r.delay <= 0 && P.holderBase !== r.target) {
+            if (!lunge && live(r) && r.state === `run` && !r.trot && r.delay <= 0 && P.holderBase !== r.target) {
               let p2 = basePos(r.s + Math.sign(r.target - r.s) * Math.min(Math.abs(r.target - r.s), speed(r) * 0.4));
-              if (dist(f, p2) < 1.2 + f.spd * 0.4) return ((f.goal = p2), (f.via = null), (P.holderBase = null), !0);
+              dist(f, p2) < 1.2 + f.spd * 0.4 && (lunge = { f, p: p2, k: r.target });
             }
-          if (P.holder.startsWith(`out`)) return ofDefense();
+          if (P.holder.startsWith(`out`)) return lunge ? doLunge() : ofDefense();
         }
         let h = P.f[P.holder],
           best = null;
@@ -590,7 +623,8 @@ var BB_SIM = (() => {
           let rt = runnerTime(r, k),
             // 외야에서 홈·3루로 길게 던질 때는 보살 가능성이 높을 때만. 아니면 아래에서 내야로 중계해
             // 타자·뒤 주자의 추가 진루를 막음
-            need = d > 45 && k >= 3 ? BB_RELAY_MARGIN : 0.05;
+            // (실제 경기에서는 외야수만. 중계 선수는 접전이면 바로 홈·3루로 이어 던짐)
+            need = d > 45 && k >= 3 && (P.st.demo || P.holder.startsWith(`out`)) ? BB_RELAY_MARGIN : 0.05;
           if (tt + need < rt) {
             // 2아웃이면 가장 확실한 아웃, 아니면 앞선 주자(실점 방지) 우선.
             // 단 앞 주자가 아슬아슬하면(번트 0.25초, 그 밖 0.05초 미만) 확실한 타자 아웃을 먼저 (그것도 없을 때만 승부, DEMO는 그대로)
@@ -600,8 +634,17 @@ var BB_SIM = (() => {
             (!best || score > best.score) && (best = { k, score });
           }
         }
+        // 태그는 2아웃이거나, 송구로 잡을 주자가 태그할 주자보다 앞서지 않을 때만 (예: 홈으로 뛰는 3루 주자를 두고 지나가는 주자를 쫓지 않음)
+        if (lunge && (!best || P.st.outs + P.outs.length === 2 || lunge.k >= best.k)) return doLunge();
         if (best) return (throwTo(best.k), !0);
         if (P.runnerOnly) return !1; // 도루·런다운: 늦었으면 던지지 않음 (1·3루에서 3루 주자에게 홈을 내주지 않게)
+        // 실제 경기: 공을 들고 있기 / 각 베이스로 던지기 중 주자를 가장 덜 보내는 쪽 (같으면 들고 있기)
+        if (!P.st.demo) {
+          if (!P.r.some((r) => live(r) && r.state === `run` && r.target > r.s)) return !1;
+          let ready = Math.max(0, P.readyAt - P.t),
+            o = leastAdv([{ k: 0, tb: (j) => ready + thrT(h, j) }, ...[1, 2, 3, 4].filter((k) => k !== P.holderBase).map((k) => ({ k, tb: tbThrow(h, k, ready) }))]);
+          return o.k ? (throwTo(o.k), !0) : !1;
+        }
         // 잡을 수 없으면: 달리는 주자가 더 못 가도록 맨 뒤 주자의 다음 베이스로
         let moving = P.r.filter((r) => live(r) && r.state === `run` && r.target > r.s);
         if (moving.length) {
