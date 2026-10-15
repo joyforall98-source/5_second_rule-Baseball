@@ -281,9 +281,11 @@ var BB_SIM = (() => {
         if (P.cover[b] === k0 || !(bases[b - 1] || bases[b - 2] || b === 4)) continue;
         ((f.startAt = 0), (f.goal = { ...B }), d > 0 && ((f.x += ((B.x - f.x) / d) * m), (f.y += ((B.y - f.y) / d) * m)));
       }
+      // 뛰지 않는 주자는 리드에서 베이스로 돌아와 서 있음 (예전: 리드 자리에 멈춰 결과에서 사라짐)
+      for (let r of P.r) r.stealing || (r.s = r.from);
       if (bb.pick) {
         let r = P.r.find((x) => x.from === bb.pick);
-        r && ((r.s += 0.12), (r.state = `run`), (r.target = r.from + 1)); // 이미 다음 루로 스타트
+        r && ((r.s = r.from + 0.12 + Math.max(0, (st.leads || [])[r.from - 1] || 0) * 0.06), (r.state = `run`), (r.target = r.from + 1)); // 이미 다음 루로 스타트
       }
       // 포수가 받고 나서 던지기까지(EASY 0.45~1.05초, HARD 0.75~1.35초. HARD는 송구가 빨라 전체로는 더 빠름), 투수는 바로 돌아서 던짐
       P.ev = { key: k0, t: 0, p: { x: P.f[k0].x, y: P.f[k0].y }, ready: bb.steal ? c.pop + rnd(0, 0.6) : 0.35 };
@@ -425,7 +427,8 @@ var BB_SIM = (() => {
       if (r.stealing) continue; // 도루 스타트한 주자는 그대로 달림 (히트 앤드 런)
       // 공이 맞을 때 주자는 리드한 자리에서 출발: 1·3루 0.4m, 2루 1.1m (EASY 인플레이 타율 .33~.34에 맞춤).
       // 번트는 대는 순간 스타트하므로 2.7m · 5.5m (넓게·짧게 ±1.6m. DEMO는 그대로)
-      st.demo || (r.s = r.from + (bb.bunt ? (r.from === 2 ? 0.2 : 0.1) : r.from === 2 ? 0.04 : 0.015) + ((st.leads || [])[r.from - 1] || 0) * 0.06);
+      // (짧게 잡아도 베이스 뒤로는 가지 않음: 예전엔 베이스 뒤 1.98에 선 채 결과에서 사라짐)
+      st.demo || (r.s = r.from + Math.max(0, (bb.bunt ? (r.from === 2 ? 0.2 : 0.1) : r.from === 2 ? 0.04 : 0.015) + ((st.leads || [])[r.from - 1] || 0) * 0.06));
       if (two) {
         // 2아웃: 타격과 동시에 출발
         ((r.state = `run`), (r.delay = 0.1), (r.s = st.demo ? r.from + 0.06 : r.s), (r.target = r.from + 1));
@@ -522,8 +525,9 @@ var BB_SIM = (() => {
       throwPlan = (k, carry) => {
         let h = P.f[P.holder],
           d = dist(h, BB_BASES[k]),
-          tt = carry || d < 7 ? d / c.ifSpd + 0.1 : thrT(h, k), // 가까우면 직접 들고 뛰어감
-          rec = carry || P.cover[k] === P.holder || (!P.st.demo && d < 7) ? P.holder : P.cover[k];
+          rec = carry || P.cover[k] === P.holder || (!P.st.demo && d < 7) ? P.holder : P.cover[k],
+          // 가까우면 직접 들고 뛰어감. 실제 경기는 자기가 맡은 베이스면 멀어도 들고 뜀 (예전: 송구 속도로 순간이동)
+          tt = carry || d < 7 || (!P.st.demo && rec === P.holder) ? d / c.ifSpd + 0.1 : thrT(h, k);
         // 받을 선수가 아직 오는 중이면 기다렸다가, 베이스에 닿는 순간 공이 도착하게 던짐 (DEMO는 그대로)
         return { tt, rec, wait: !P.st.demo && rec !== P.holder ? Math.max(0, recvT(k) - tt) : 0 };
       },
@@ -542,14 +546,22 @@ var BB_SIM = (() => {
       },
       // 외야 → 베이스 k 중계: 내야수가 외야수와 베이스 사이(베이스에서 40% 지점)에서 받음.
       // 홈은 왼쪽이면 3루수, 아니면 1루수 / 2·3루는 2루를 맡지 않은 유격수·2루수. 비운 베이스는 투수가 커버
+      // 중계 계획: 중계 지점, 받을 내야수, 날아가는 시간, 그 선수가 중계 지점에 닿을 때까지 외야수가 기다리는 시간
+      cutPlan = (k) => {
+        let h = P.f[P.holder],
+          cp = lerp(BB_BASES[k], h, 0.4),
+          key = k === 4 ? (h.x < -15 ? `inf-3b` : `inf-1b`) : P.cover[2] === `inf-ss` ? `inf-2b` : `inf-ss`,
+          f = P.f[key],
+          flight = dist(h, cp) / c.thr;
+        return { cp, key, flight, wait: Math.max(0, Math.max(0, f.startAt - P.t) + dist(f, cp) / f.spd - flight) };
+      },
       cutTo = (k) => {
         let h = P.f[P.holder],
           from = { x: h.x, y: h.y },
-          to = lerp(BB_BASES[k], from, 0.4),
-          key = k === 4 ? (h.x < -15 ? `inf-3b` : `inf-1b`) : P.cover[2] === `inf-ss` ? `inf-2b` : `inf-ss`;
+          { cp: to, key, flight, wait } = cutPlan(k); // 중계 선수가 늦으면 기다렸다 던짐 (예전: 공이 닿는 순간 순간이동)
         for (let j = 1; j <= 3; j++) P.cover[j] === key && ((P.cover[j] = `pitcher`), (P.f.pitcher.goal = { ...BB_BASES[j] }), (P.f.pitcher.via = null));
         P.f[key].via = null;
-        ((P.ball = { mode: `thrown`, from, to, t0: P.t, t1: P.t + dist(from, to) / c.thr, toBase: null, receiver: key, by: P.holder, x: from.x, y: from.y, h: 1.5 }),
+        ((P.ball = { mode: `thrown`, from, to, t0: P.t + wait, t1: P.t + wait + flight, toBase: null, receiver: key, by: P.holder, x: from.x, y: from.y, h: 1.5 }),
           (P.holderBase = null),
           P.throws++,
           (P.f[key].goal = { ...to }));
@@ -584,7 +596,12 @@ var BB_SIM = (() => {
       ofDefense = () => {
         let h = P.f[P.holder],
           via = (k) => dist(h, BB_BASES[k]) > 45,
-          tOf = (k) => Math.max(via(k) ? dist(h, BB_BASES[k]) / c.thr + 0.3 : thrT(h, k), recvT(k)),
+          // 중계 거쳐 베이스 k까지: 중계 지점까지(기다림 포함) + 몸 돌리기 0.3초 + 남은 거리
+          viaT = (k) => {
+            let p = cutPlan(k);
+            return p.wait + p.flight + 0.3 + dist(p.cp, BB_BASES[k]) / c.thr;
+          },
+          tOf = (k) => Math.max(via(k) ? viaT(k) : thrT(h, k), recvT(k)),
           best = null;
         for (let r of P.r) {
           if (!live(r) || r.delay > 0.5 || r.state !== `run` || r.target < 1) continue;
@@ -607,8 +624,8 @@ var BB_SIM = (() => {
             // 중계면 공은 중계 지점(베이스에서 40%)에 먼저 가고, 중계 선수가 어디로든 이어 던질 수 있음
             opt = (k) => {
               if (!via(k)) return { k, tb: tbThrow(k, 0) };
-              let cp = lerp(BB_BASES[k], h, 0.4),
-                T = dist(h, cp) / c.thr + 0.3;
+              let { cp, flight, wait } = cutPlan(k),
+                T = wait + flight + 0.3;
               return { k, tb: (j) => T + thrT(cp, j) };
             };
           k = leastAdv([k0, 1, 2, 3, 4].filter((x, i, a) => a.indexOf(x) === i).map(opt)).k;
@@ -725,12 +742,15 @@ var BB_SIM = (() => {
           let remain = Math.abs(k - r.s) * BB_LEG;
           // 베이스 가까이(DEMO 8m, 실제 경기 3m)면 멈추지 못해 아웃. 실제 경기에서 그보다 멀면 되돌아가다 협살에 걸릴 수 있음
           if (isForce(r, k) || remain <= (P.st.demo ? 8 : 3)) out(r, k, isForce(r, k), b.by);
-          else if (!r.manual && !r.retouch) (setTarget(r, k > r.s ? r.touched : Math.ceil(r.s)), P.st.demo || startRd(r)); // 늦었으면 되돌아감
+          // 늦었으면 되돌아감 (실제 경기: 앞 베이스에 주자가 있으면 그쪽으로는 못 감)
+          else if (!r.manual && !r.retouch) (setTarget(r, k > r.s || P.st.demo ? (k > r.s ? r.touched : Math.ceil(r.s)) : Math.min(limitOf(r), Math.ceil(r.s))), P.st.demo || startRd(r));
         }
         // 협살 중 공을 받으면 주자는 멈칫하고(0.5초) 반대 베이스로
         if (b.rd && P.rd) {
           let r = P.r.find((x) => x.id === P.rd.id);
-          live(r) && ((P.rd.flee = P.rd.flee === P.rd.lo ? P.rd.lo + 1 : P.rd.lo), setTarget(r, P.rd.flee), (r.delay = 0.5));
+          let other = P.rd.flee === P.rd.lo ? P.rd.lo + 1 : P.rd.lo;
+          // 반대 베이스에 앞 주자가 있으면 도망갈 곳이 없음 → 그대로 몰려 태그 (예전: 막힌 베이스로 끝없이 오감)
+          live(r) && other <= limitOf(r) && ((P.rd.flee = other), setTarget(r, other), (r.delay = 0.5));
         }
       },
       // 협살 시작: 되돌아가는 주자보다 공이 먼저 그 베이스에 닿을 수 있으면, 두 베이스 사이에 가둠
