@@ -1057,7 +1057,6 @@ function b() {
         (e.halfBreak = null),
         (e.endInfo = null),
         (e.pickWarn = null),
-        (e.rundown = null),
         (e.play = null),
         (e.awaitPitch = !1),
         (e.pitchSel = { type: null, zone: null, out: !1 }),
@@ -1157,11 +1156,11 @@ function b() {
     let s = o.current;
     s.awaitPitch && ((s.align = k === `기본` ? null : k), T());
   };
-  // 견제 동작·런다운 중 주자 선택. 다음 루에 주자가 있으면 진루 불가, 견제 동작 땐 첫 선택만
+  // 견제 동작 중 주자 선택 (첫 선택만). 다음 루에 주자가 있으면 진루 불가
   let runnerGo = (go) => {
     let s = o.current,
-      rr = s.pickWarn || s.rundown;
-    if (!rr || s.paused || (s.pickWarn && rr.go) || (go === `advance` && rr.b < 3 && s.baseStatus[rr.b])) return;
+      rr = s.pickWarn;
+    if (!rr || s.paused || rr.go || (go === `advance` && rr.b < 3 && s.baseStatus[rr.b])) return;
     ((rr.go = go), T());
   };
   // 사람 수비의 직접 견제. 끝나면 다시 투구 선택
@@ -1189,7 +1188,7 @@ function b() {
       }
       let pk = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4, Numpad1: 0, Numpad2: 1, Numpad3: 2, Numpad4: 3, Numpad5: 4 }[e.code];
       if (pk != null && !s.awaitPitch) return (e.preventDefault(), setPlan(BB_PLAN_KEYS[pk]));
-      if ((s.pickWarn || s.rundown) && (e.code === `ArrowRight` || e.code === `ArrowLeft`))
+      if (s.pickWarn && (e.code === `ArrowRight` || e.code === `ArrowLeft`))
         return (e.preventDefault(), runnerGo(e.code === `ArrowRight` ? `advance` : `return`));
       // 주루 지시: → 전원 진루, ← 전원 귀루
       if (s.play && !s.paused && s.bat !== s.cpu && (e.code === `ArrowRight` || e.code === `ArrowLeft`)) {
@@ -1367,7 +1366,7 @@ function b() {
           : null,
       demo: j.demo,
       menuStep: j.menuStep,
-      runAlert: j.pickWarn ? { kind: `warn`, ...j.pickWarn } : j.rundown ? { kind: `rd`, ...j.rundown } : null,
+      runAlert: j.pickWarn || null,
       tbRunner: j.tbRunner,
       // 주루 지시 패널: 살아있는 주자별 가능 여부
       runCtl:
@@ -1821,22 +1820,21 @@ function DemoPanel({ demo, onPick, onRetry, onNext, onList }) {
         ],
       });
 }
-// 견제 동작·런다운 때 주자 안내: ← 귀루 / → 스타트·진루
+// 견제 동작 때 주자 안내: ← 귀루 / → 스타트 (런다운은 sim.js 협살)
 function RunnerAlert({ alert, onGo }) {
   if (!alert) return null;
-  let next = alert.b === 3 ? `홈` : `${alert.b + 1}루`;
   return (0, S.jsxs)(`div`, {
     className: `bb-pitchprompt bb-runalert`,
     children: [
       (0, S.jsx)(`div`, {
         className: `bb-pitchprompt-title`,
-        children: alert.kind === `warn` ? `견제 동작! ${alert.b}루 주자 ← 빨리 귀루` : `런다운! ${alert.b}루 ↔ ${next} · 슬라이딩할 쪽 선택`,
+        children: `견제 동작! ${alert.b}루 주자 ← 빨리 귀루`,
       }),
       (0, S.jsxs)(`div`, {
         className: `bb-pitchprompt-types`,
         children: [
           (0, S.jsx)(`button`, { className: alert.go === `return` ? `on` : ``, onClick: () => onGo(`return`), children: `← ${alert.b}루 귀루` }),
-          (0, S.jsx)(`button`, { className: alert.go === `advance` ? `on` : ``, onClick: () => onGo(`advance`), children: alert.kind === `warn` ? `→ 스타트` : `→ ${next}` }),
+          (0, S.jsx)(`button`, { className: alert.go === `advance` ? `on` : ``, onClick: () => onGo(`advance`), children: `→ 스타트` }),
         ],
       }),
     ],
