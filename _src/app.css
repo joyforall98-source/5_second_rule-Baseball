@@ -3,7 +3,9 @@
 .bb-field.top-down-view{transform:rotateX(40deg) translateY(-36px) scale(1.02)}
 .bb-field.top-down-view .bb-player,.bb-field.top-down-view .bb-pitcher,.bb-field.top-down-view .bb-batter{transform:translate(-50%)rotateX(-40deg)}
 .bb-field .bb-player{width:20px;height:20px;font-size:10px}
-.bb-field .bb-runner{font-size:10px}
+.bb-field .bb-runner{font-size:10px;box-shadow:0 2px 4px #0006}
+/* 수비수 원: 흰 글자 대비 4.5:1 이상 (#2980b9는 4.3:1) */
+.bb-field .bb-defense{background-color:#2471a3}
 .bb-field .bb-batter{left:53%}
 .bb-ball-shadow{position:absolute;display:none;z-index:4;width:8px;height:5px;border-radius:50%;background:#0000008c;transform:translate(-50%,50%);pointer-events:none}
 
