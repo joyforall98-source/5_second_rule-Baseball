@@ -342,7 +342,7 @@ function b() {
         (e.playballDisabled = humanDef()),
         (e.swingDisabled = !0),
         (e.awaitPitch = humanDef() && !e.gameOver),
-        (e.pitchSel = { type: null, zone: null, out: !1 }),
+        (e.pitchSel = { type: e.thrown || e.mode !== `1P` ? null : 1, zone: null, out: !1 }), // 1P 첫 투구는 직구를 미리 골라 둠
         (e.statusText = humanDef() ? `${e.teams[1 - e.bat]?.name} 투구 선택` : e.autoPlay ? `다음 투구 준비…` : `Enter · 플레이볼`),
         ie(),
         T());
@@ -953,7 +953,7 @@ function b() {
         e.pitchSel.type
           ? bbMakePitch(e.difficulty === `HARD`, e.pitchSel)
           : bbGenPitch(e.difficulty === `HARD`, e.mode === `TGA` ? BB_TGA[e.difficulty].strike : null);
-      ((e.awaitPitch = !1), (e.pitchSel = { type: null, zone: null, out: !1 }), bvRef.current.rig?.pitcher(`windup`));
+      ((e.awaitPitch = !1), (e.thrown = !0), (e.pitchSel = { type: null, zone: null, out: !1 }), bvRef.current.rig?.pitcher(`windup`));
       ((e.pitch = P),
         (e.pitchType = P.isStrike ? `strike` : `ball`),
         T(),
@@ -1061,6 +1061,7 @@ function b() {
         (e.play = null),
         (e.awaitPitch = !1),
         (e.pitchSel = { type: null, zone: null, out: !1 }),
+        (e.thrown = !1),
         (e.tbRunner = null),
         (e.difficulty = null),
         (e.autoPlay = !1),
@@ -1358,6 +1359,7 @@ function b() {
       endInfo: j.endInfo,
       awaitPitch: j.awaitPitch,
       pitchSel: { type: j.pitchSel.type, zone: !!j.pitchSel.zone },
+      firstPitch: !j.thrown && j.mode === `1P`,
       batPlan: j.batPlan,
       leads: j.leads || [0, 0, 0],
       align: j.align,
@@ -1557,7 +1559,7 @@ function ee({
         className: `bb-score-topright bb-sb2`,
         "aria-label": `점수판`,
         children: [
-          (0, S.jsx)(`div`, { className: `bb-score-label`, children: `${inning}회${half === `top` ? `초 ▲` : `말 ▼`}${need > 0 ? ` · 역전까지 ${need}점` : ``}` }),
+          (0, S.jsxs)(`div`, { className: `bb-score-label`, children: [`${inning}회${half === `top` ? `초 ▲` : `말 ▼`}`, need > 0 && (0, S.jsx)(`span`, { className: `bb-need`, children: `역전까지 ${need}점` })] }), // 역전 목표는 같은 줄에 크게 (점수판 높이 유지: 아래 플레이볼 버튼)
           ...teams.map((tm, k) =>
             (0, S.jsxs)(
               `div`,
@@ -1847,12 +1849,13 @@ function RunnerAlert({ alert, onGo }) {
   });
 }
 // 수비 투구 선택: 구종 버튼 + 존 주변 클릭으로 도달 지점
-function PitchPrompt({ show, sel, defName, onPick, bases, leads, onPickoff, align, onAlign }) {
+function PitchPrompt({ show, sel, defName, onPick, bases, leads, onPickoff, align, onAlign, first }) {
   return show
     ? (0, S.jsxs)(`div`, {
         className: `bb-pitchprompt`,
         children: [
           (0, S.jsx)(`div`, { className: `bb-pitchprompt-title`, children: `${defName} 투구 · 존 클릭 또는 QWE/ASD/ZXC${sel.zone ? ` ✓` : ``}` }),
+          first && (0, S.jsx)(`div`, { className: `bb-pitchprompt-first`, children: `수비 차례예요! 직구가 골라져 있으니 존(네모 칸)만 누르면 던져요` }),
           (0, S.jsx)(`div`, {
             className: `bb-pitchprompt-types`,
             children: BB_PITCHES.map(([name], i) =>
@@ -2497,6 +2500,7 @@ function ce() {
                 leads: t.leads,
                 align: t.mode === `2P` ? t.align || `기본` : null,
                 onAlign: n.setAlign,
+                first: t.firstPitch,
               }),
               (0, S.jsx)(ee, {
                 statusText: t.statusText,

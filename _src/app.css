@@ -113,14 +113,10 @@
 .bb-demo .row{display:flex;gap:8px;margin-top:14px}
 .bb-demo .row button{flex:1;text-align:center}
 /* (.bb-root는 인라인 스타일로 padding·overflow가 정해져 있어 !important) 1240px 이상: 안내판을 오른쪽에 고정하고 경기장을 그만큼 왼쪽으로 → 스크롤 없이 함께 보임.
-   1700px 이상(프로젝터 등)은 경기장을 가운데 그대로 두고 오른쪽 빈 공간을 씀. 더 좁으면 경기장 아래 + 스크롤 */
+   안내판 폭은 화면에 맞춰 380~520px (프로젝터에서도 경기장과 겹치지 않음). 더 좁으면 경기장 아래 + 스크롤 */
 @media (min-width:1240px){
-  .bb-root:has(.bb-demo){padding-right:400px!important;box-sizing:border-box}
-  .bb-demo{position:fixed;top:50%;right:16px;transform:translateY(-50%);width:380px;margin:0;max-height:94vh;overflow:auto;z-index:40}
-}
-@media (min-width:1700px){
-  .bb-root:has(.bb-demo){padding-right:12px!important}
-  .bb-demo{right:24px;width:calc((100vw - 900px) / 2);max-width:560px}
+  .bb-root:has(.bb-demo){padding-right:calc(clamp(380px, 26vw, 520px) + 20px)!important;box-sizing:border-box}
+  .bb-demo{position:fixed;top:50%;right:16px;transform:translateY(-50%);width:clamp(380px, 26vw, 520px);margin:0;max-height:94vh;overflow:auto;z-index:40}
 }
 @media (max-width:1239px){body:has(.bb-demo){overflow:auto}.bb-root:has(.bb-demo){overflow:visible!important}}
 @media (max-width:640px){.bb-demo{font-size:15px;padding:12px}.bb-demo .ask{font-size:17px}.bb-demo button{font-size:16px}.bb-demo .explain{font-size:16px}}
@@ -238,3 +234,8 @@
 .bb-btn-desc small{font-size:12px;font-weight:600;opacity:.85}
 .bb-howto section{display:grid;gap:4px;align-content:start}
 .bb-howto h4{margin:0 0 6px;font-size:14px;color:#f1c40f}
+/* ── 대화상자가 화면보다 길면 잘리지 않고 스크롤 (1366×768 How To Play, 폰 DEMO 목록) ── */
+div.bb-pause-overlay{overflow-y:auto;align-items:safe center}
+/* ── 역전 목표, 1P 첫 투구 안내 ── */
+.bb-need{margin-left:8px;font-size:16px;letter-spacing:0;font-weight:900}
+.bb-pitchprompt-first{color:#f1c40f;font-weight:800;font-size:14px}

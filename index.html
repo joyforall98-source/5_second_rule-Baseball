@@ -2384,7 +2384,7 @@ function b() {
         (e.playballDisabled = humanDef()),
         (e.swingDisabled = !0),
         (e.awaitPitch = humanDef() && !e.gameOver),
-        (e.pitchSel = { type: null, zone: null, out: !1 }),
+        (e.pitchSel = { type: e.thrown || e.mode !== `1P` ? null : 1, zone: null, out: !1 }), // 1P 첫 투구는 직구를 미리 골라 둠
         (e.statusText = humanDef() ? `${e.teams[1 - e.bat]?.name} 투구 선택` : e.autoPlay ? `다음 투구 준비…` : `Enter · 플레이볼`),
         ie(),
         T());
@@ -2995,7 +2995,7 @@ function b() {
         e.pitchSel.type
           ? bbMakePitch(e.difficulty === `HARD`, e.pitchSel)
           : bbGenPitch(e.difficulty === `HARD`, e.mode === `TGA` ? BB_TGA[e.difficulty].strike : null);
-      ((e.awaitPitch = !1), (e.pitchSel = { type: null, zone: null, out: !1 }), bvRef.current.rig?.pitcher(`windup`));
+      ((e.awaitPitch = !1), (e.thrown = !0), (e.pitchSel = { type: null, zone: null, out: !1 }), bvRef.current.rig?.pitcher(`windup`));
       ((e.pitch = P),
         (e.pitchType = P.isStrike ? `strike` : `ball`),
         T(),
@@ -3103,6 +3103,7 @@ function b() {
         (e.play = null),
         (e.awaitPitch = !1),
         (e.pitchSel = { type: null, zone: null, out: !1 }),
+        (e.thrown = !1),
         (e.tbRunner = null),
         (e.difficulty = null),
         (e.autoPlay = !1),
@@ -3400,6 +3401,7 @@ function b() {
       endInfo: j.endInfo,
       awaitPitch: j.awaitPitch,
       pitchSel: { type: j.pitchSel.type, zone: !!j.pitchSel.zone },
+      firstPitch: !j.thrown && j.mode === `1P`,
       batPlan: j.batPlan,
       leads: j.leads || [0, 0, 0],
       align: j.align,
@@ -3599,7 +3601,7 @@ function ee({
         className: `bb-score-topright bb-sb2`,
         "aria-label": `점수판`,
         children: [
-          (0, S.jsx)(`div`, { className: `bb-score-label`, children: `${inning}회${half === `top` ? `초 ▲` : `말 ▼`}${need > 0 ? ` · 역전까지 ${need}점` : ``}` }),
+          (0, S.jsxs)(`div`, { className: `bb-score-label`, children: [`${inning}회${half === `top` ? `초 ▲` : `말 ▼`}`, need > 0 && (0, S.jsx)(`span`, { className: `bb-need`, children: `역전까지 ${need}점` })] }), // 역전 목표는 같은 줄에 크게 (점수판 높이 유지: 아래 플레이볼 버튼)
           ...teams.map((tm, k) =>
             (0, S.jsxs)(
               `div`,
@@ -3889,12 +3891,13 @@ function RunnerAlert({ alert, onGo }) {
   });
 }
 // 수비 투구 선택: 구종 버튼 + 존 주변 클릭으로 도달 지점
-function PitchPrompt({ show, sel, defName, onPick, bases, leads, onPickoff, align, onAlign }) {
+function PitchPrompt({ show, sel, defName, onPick, bases, leads, onPickoff, align, onAlign, first }) {
   return show
     ? (0, S.jsxs)(`div`, {
         className: `bb-pitchprompt`,
         children: [
           (0, S.jsx)(`div`, { className: `bb-pitchprompt-title`, children: `${defName} 투구 · 존 클릭 또는 QWE/ASD/ZXC${sel.zone ? ` ✓` : ``}` }),
+          first && (0, S.jsx)(`div`, { className: `bb-pitchprompt-first`, children: `수비 차례예요! 직구가 골라져 있으니 존(네모 칸)만 누르면 던져요` }),
           (0, S.jsx)(`div`, {
             className: `bb-pitchprompt-types`,
             children: BB_PITCHES.map(([name], i) =>
@@ -4539,6 +4542,7 @@ function ce() {
                 leads: t.leads,
                 align: t.mode === `2P` ? t.align || `기본` : null,
                 onAlign: n.setAlign,
+                first: t.firstPitch,
               }),
               (0, S.jsx)(ee, {
                 statusText: t.statusText,
@@ -4751,14 +4755,10 @@ function ce() {
 .bb-demo .row{display:flex;gap:8px;margin-top:14px}
 .bb-demo .row button{flex:1;text-align:center}
 /* (.bb-root는 인라인 스타일로 padding·overflow가 정해져 있어 !important) 1240px 이상: 안내판을 오른쪽에 고정하고 경기장을 그만큼 왼쪽으로 → 스크롤 없이 함께 보임.
-   1700px 이상(프로젝터 등)은 경기장을 가운데 그대로 두고 오른쪽 빈 공간을 씀. 더 좁으면 경기장 아래 + 스크롤 */
+   안내판 폭은 화면에 맞춰 380~520px (프로젝터에서도 경기장과 겹치지 않음). 더 좁으면 경기장 아래 + 스크롤 */
 @media (min-width:1240px){
-  .bb-root:has(.bb-demo){padding-right:400px!important;box-sizing:border-box}
-  .bb-demo{position:fixed;top:50%;right:16px;transform:translateY(-50%);width:380px;margin:0;max-height:94vh;overflow:auto;z-index:40}
-}
-@media (min-width:1700px){
-  .bb-root:has(.bb-demo){padding-right:12px!important}
-  .bb-demo{right:24px;width:calc((100vw - 900px) / 2);max-width:560px}
+  .bb-root:has(.bb-demo){padding-right:calc(clamp(380px, 26vw, 520px) + 20px)!important;box-sizing:border-box}
+  .bb-demo{position:fixed;top:50%;right:16px;transform:translateY(-50%);width:clamp(380px, 26vw, 520px);margin:0;max-height:94vh;overflow:auto;z-index:40}
 }
 @media (max-width:1239px){body:has(.bb-demo){overflow:auto}.bb-root:has(.bb-demo){overflow:visible!important}}
 @media (max-width:640px){.bb-demo{font-size:15px;padding:12px}.bb-demo .ask{font-size:17px}.bb-demo button{font-size:16px}.bb-demo .explain{font-size:16px}}
@@ -4876,6 +4876,11 @@ function ce() {
 .bb-btn-desc small{font-size:12px;font-weight:600;opacity:.85}
 .bb-howto section{display:grid;gap:4px;align-content:start}
 .bb-howto h4{margin:0 0 6px;font-size:14px;color:#f1c40f}
+/* ── 대화상자가 화면보다 길면 잘리지 않고 스크롤 (1366×768 How To Play, 폰 DEMO 목록) ── */
+div.bb-pause-overlay{overflow-y:auto;align-items:safe center}
+/* ── 역전 목표, 1P 첫 투구 안내 ── */
+.bb-need{margin-left:8px;font-size:16px;letter-spacing:0;font-weight:900}
+.bb-pitchprompt-first{color:#f1c40f;font-weight:800;font-size:14px}
 
 /*APP_CSS_END*//*$vite$:1*/</style>
   </head>
