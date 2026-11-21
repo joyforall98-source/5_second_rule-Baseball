@@ -508,6 +508,8 @@ function b() {
         hrShown = !1,
         errShown = !1,
         rdErrShown = !1,
+        catchShown = !1,
+        fx = e.mode !== `DEMO`, // 포구 고리·공 가진 수비수 표시 (DEMO는 그대로)
         acc = 0, // 아직 진행하지 않은 시뮬레이션 시간(초)
         place = (el, x, yy) => {
           if (!el) return;
@@ -525,7 +527,15 @@ function b() {
               P.distance != null &&
               !P.possessed &&
               (e.distanceText = `${Math.round(Math.min(P.distance, Math.hypot(b.x, b.y)))} m`));
-          for (let key in vw.fielders) place(i.current[key], vw.fielders[key].x, vw.fielders[key].y);
+          for (let key in vw.fielders)
+            (place(i.current[key], vw.fielders[key].x, vw.fielders[key].y),
+              i.current[key]?.classList.toggle(`hold`, fx && !P.done && P.ball.mode === `held` && key === P.holder)); // 공을 가진 수비수: 노란 테두리
+          // 뜬공을 땅에 닿기 전에 잡은 순간: 그 수비수 자리에 고리 (아웃·태그업이 여기서 갈림)
+          if (fx && !catchShown && P.caught) {
+            catchShown = !0;
+            let el = i.current[P.caught.key];
+            el && (el.classList.add(`catch`), setTimeout(() => el.classList.remove(`catch`), 700));
+          }
           // 공을 놓치거나 더듬은 순간, 그 수비수 머리 위에 느낌표 (뜬공은 떨어뜨린 순간, 땅볼은 잡으려던 순간)
           if (!errShown && P.ev?.error && P.t >= Math.min(P.ev.t, P.landT)) {
             errShown = !0;
