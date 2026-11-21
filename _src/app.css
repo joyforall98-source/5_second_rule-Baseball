@@ -2,8 +2,8 @@
 .bb-field-svg{position:absolute;left:0;top:0;z-index:0;pointer-events:none}
 .bb-field.top-down-view{transform:rotateX(40deg) translateY(-36px) scale(1.02)}
 .bb-field.top-down-view .bb-player,.bb-field.top-down-view .bb-pitcher,.bb-field.top-down-view .bb-batter{transform:translate(-50%)rotateX(-40deg)}
-.bb-field .bb-player{width:15px;height:15px;font-size:7px}
-.bb-field .bb-runner{font-size:8px}
+.bb-field .bb-player{width:20px;height:20px;font-size:10px}
+.bb-field .bb-runner{font-size:10px}
 .bb-field .bb-batter{left:53%}
 .bb-ball-shadow{position:absolute;display:none;z-index:4;width:8px;height:5px;border-radius:50%;background:#0000008c;transform:translate(-50%,50%);pointer-events:none}
 
@@ -192,7 +192,7 @@
 .bb-runctl-row{display:flex;align-items:center;gap:6px;padding:3px 0}
 .bb-runctl-row.manual .bb-runctl-name{color:#f1c40f}
 .bb-runctl-name{flex:1;color:#ecf0f1;font-weight:700}
-.bb-runctl button{border:none;border-radius:4px;padding:4px 8px;font-size:11px;font-weight:800;color:#fff;background:#34495e;cursor:pointer}
+.bb-runctl button{border:none;border-radius:4px;padding:5px 9px;font-size:12px;font-weight:800;color:#fff;background:#34495e;cursor:pointer}
 .bb-runctl button:hover:not(:disabled){background:#e67e22}
 .bb-runctl button:disabled{opacity:.35;cursor:not-allowed}
 .bb-field .bb-runner.manual{border-color:#fff;box-shadow:0 0 0 2px #f1c40f,0 0 10px #f1c40f}
@@ -210,7 +210,7 @@
 .bb-menu .bb-btn{padding:12px 16px;font-size:15px;text-align:left}
 .bb-menu{display:flex;flex-direction:column;gap:10px}
 .bb-howto{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12.5px;margin:4px 0 10px}
-.bb-howto div{display:grid;grid-template-columns:62px 1fr;gap:6px;padding:5px 8px;background:#ffffff0d;border-radius:5px}
+.bb-howto div{display:grid;grid-template-columns:84px 1fr;gap:6px;padding:5px 8px;background:#ffffff0d;border-radius:5px}
 /* How To Play가 열려 있을 때만 카드를 넓혀 2열 배치 */
 .bb-pause-card:has(.bb-howto){max-width:660px}
 .bb-howto b{color:#f1c40f}
@@ -218,7 +218,7 @@
 /* 상황판 안의 타순: 이름 없이 번호 칩만 */
 .bb-hud .bb-lineup{grid-column:1/-1;gap:2px;margin:6px 0 0;flex-wrap:nowrap}
 .bb-hud .bb-lineup-name{display:none}
-.bb-hud .bb-lineup-chip{font-size:10px;padding:1px 3px}
+.bb-hud .bb-lineup-chip{font-size:11px;padding:1px 3px}
 
 /* 투구 선택: 구종 버튼, 존 주변 클릭으로 조준 */
 .bb-pitchprompt-types{display:flex;gap:6px;justify-content:center;margin-top:6px}
@@ -226,3 +226,13 @@
 .bb-pitchprompt-types button:hover{background:#2980b9}
 .bb-pitchprompt-types button.on{background:#27ae60}
 .bv.aim{cursor:crosshair}
+
+/* ── 접근성 기초: 한글 줄바꿈, 키보드 포커스, 움직임 줄이기 ── */
+.bb-root{word-break:keep-all}
+.bb-root button:focus-visible{outline:3px solid #f1c40f;outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.bb-root *,.bb-root *::before,.bb-root *::after{animation-iteration-count:1!important;animation-duration:.01ms!important}}
+/* ── 메뉴: 설명 한 줄 붙은 버튼, How To Play 두 묶음 ── */
+.bb-btn-desc{display:flex;flex-direction:column;align-items:center;gap:2px}
+.bb-btn-desc small{font-size:12px;font-weight:600;opacity:.85}
+.bb-howto section{display:grid;gap:4px;align-content:start}
+.bb-howto h4{margin:0 0 6px;font-size:14px;color:#f1c40f}

@@ -788,7 +788,9 @@ function b() {
       ) {
         ((e.swingMiss = !0),
           (e.swingFeedback =
-            adt > win
+            cpu === !0
+              ? null // 컴퓨터 타자의 헛스윙: 내 평가가 아님
+              : adt > win
               ? { text: dt < 0 ? `너무 빠름` : `너무 늦음`, color: `#e74c3c` }
               : { text: `볼에 헛스윙`, color: `#e74c3c` }),
           (e.statusText = `헛스윙!`),
@@ -815,6 +817,7 @@ function b() {
               color: adt <= win * 0.5 ? `#2ecc71` : `#e67e22`,
             }),
         off > 1 && (e.swingFeedback.text += ` · 볼을 건드림`),
+        cpu === !0 && (e.swingFeedback = null), // 컴퓨터 타자의 타격: 내 화면에 PERFECT! 등을 띄우지 않음
         (e.pitchInfo = `${P.name} ${P.kmh}km/h`),
         (e.statusText = `타격!`),
         bv.spark &&
@@ -1193,6 +1196,8 @@ function b() {
         (e.preventDefault(), s.play.commandAll(e.code === `ArrowRight` ? `advance` : `return`), T());
         return;
       }
+      // 경기 중 Space는 언제나 타격 키, 게임 버튼 위의 Enter는 플레이볼 키 (예전: 플레이볼을 누른 뒤 Space → 남은 포커스로 일시정지)
+      s.difficulty && !s.paused && !s.gameOver && (e.code === `Space` || (e.code === `Enter` && e.target.closest?.(`.bb-gbtn-main, .bb-gbtn-swing, .bb-plan`))) && e.preventDefault();
       (e.code === `Space` &&
         !s.swingDisabled &&
         !s.paused &&
@@ -1552,7 +1557,7 @@ function ee({
         className: `bb-score-topright bb-sb2`,
         "aria-label": `점수판`,
         children: [
-          (0, S.jsx)(`div`, { className: `bb-score-label`, children: `${inning}회${half === `top` ? `초 ▲` : `말 ▼`}${need > 0 ? ` · 역전 ${need}점` : ``}` }),
+          (0, S.jsx)(`div`, { className: `bb-score-label`, children: `${inning}회${half === `top` ? `초 ▲` : `말 ▼`}${need > 0 ? ` · 역전까지 ${need}점` : ``}` }),
           ...teams.map((tm, k) =>
             (0, S.jsxs)(
               `div`,
@@ -1569,6 +1574,8 @@ function ee({
         className: `bb-hud`,
         children: [
           (0, S.jsxs)(`div`, {
+            role: `status`,
+            "aria-live": `polite`,
             children: [`상황: `, (0, S.jsx)(`span`, { children: e })],
           }),
           (0, S.jsxs)(`div`, {
@@ -1646,6 +1653,7 @@ function te({ text: e, color: t, visible: n }) {
   return n
     ? (0, S.jsx)(`div`, {
         className: `bb-result-display`,
+        role: `status`,
         style: { color: t },
         dangerouslySetInnerHTML: { __html: e },
       })
@@ -1866,30 +1874,45 @@ function PitchPrompt({ show, sel, defName, onPick, bases, leads, onPickoff, alig
       })
     : null;
 }
-// How To Play: 조작·규칙을 한 표로 (게임 화면에는 설명 글을 두지 않음)
-var HOWTO = [
-  [`타격`, `Space · 화면 터치`],
-  [`투구 시작`, `Enter 한 번 → 이후 자동 (일시정지 Esc)`],
-  [`타격 작전`, `1 밀어치기 · 2 당겨치기 · 3 번트 · 4 다운스윙 · 5 어퍼스윙`],
-  [`투구 구종`, `1 직구 · 2 슬라이더 · 3 커브 · 4 체인지업`],
-  [`투구 코스`, `존 클릭 · 또는 QWE/ASD/ZXC (⇧ 볼)`],
-  [`주루`, `→ 진루 · ← 귀루 · 주자를 눌러 도루·리드 폭`],
-  [`견제 동작`, `← 빨리 귀루하면 세이프 · 스타트하면 런다운`],
-  [`견제`, `수비 때 견제 버튼 · ⇧1–3`],
-  [`일시정지`, `Esc`],
-  [`5초 룰`, `타구 5초 뒤 주루 지시 마감, 판정 확정`],
-  [`연장`, `동점이면 무사 2루 승부치기`],
-  [`콜드`, `5회 15점 · 7회 10점 차 (5·9이닝)`],
-  [`TGA`, `9회말 2·4·5점 차(EASY·SOSO·HARD) — 역전`],
-  [`DEMO`, `상황 카드로 기초 규칙·공격·수비 전략 배우기`],
-  [`사사구`, `볼넷·몸에 맞는 공 → 타자 1루`],
-  [`폭투·포일`, `공이 뒤로 빠지면 주자 한 베이스씩`],
-  [`낫아웃`, `3스트라이크를 포수가 놓치면 타자가 1루로 (1루가 비었거나 2아웃)`],
-];
+// How To Play: 조작(키)과 규칙(쉬운 풀이)을 나눠서 (게임 화면에는 설명 글을 두지 않음)
+var HOWTO = {
+  조작: [
+    [`타격`, `Space · 타격 버튼 · 화면 터치`],
+    [`투구 시작`, `Enter 한 번 → 이후 자동 (일시정지 Esc)`],
+    [`타격 작전`, `1 밀어치기 · 2 당겨치기 · 3 번트 · 4 다운스윙 · 5 어퍼스윙`],
+    [`주루`, `공이 날아가는 동안 → 진루 · ← 귀루 · 주자를 눌러 도루·리드 폭`],
+    [`견제 동작`, `← 빨리 귀루하면 세이프 · → 스타트하면 런다운`],
+    [`투구 구종`, `1 직구 · 2 슬라이더 · 3 커브 · 4 체인지업`],
+    [`투구 코스`, `존 클릭 · 또는 QWE·ASD·ZXC (⇧ 누르면 볼)`],
+    [`견제`, `수비 때 견제 버튼 · ⇧1–3`],
+  ],
+  규칙: [
+    [`5초 룰`, `공을 친 뒤 5초가 지나면 주루 지시를 더 할 수 없어요`],
+    [`사사구`, `볼 4개(볼넷)나 몸에 맞는 공이면 타자가 1루로 가요`],
+    [`낫아웃`, `세 번째 스트라이크를 포수가 놓치면 타자가 1루로 뛸 수 있어요 (1루가 비었거나 2아웃일 때)`],
+    [`폭투·포일`, `공이 포수 뒤로 빠지면 주자가 한 베이스씩 가요`],
+    [`런다운(협살)`, `두 베이스 사이에 갇힌 주자를 수비가 공을 주고받으며 몰아 태그해요`],
+    [`연장`, `동점이면 주자를 2루에 두고 시작해요 (승부치기)`],
+    [`콜드게임`, `5회에 15점, 7회에 10점 넘게 벌어지면 끝나요 (5·9이닝 경기)`],
+    [`역전 미션`, `9회말 2·4·5점 뒤진 채 시작해 역전하면 성공 (EASY·SOSO·HARD)`],
+    [`DEMO`, `상황 카드로 기초 규칙과 공격·수비 전략을 배워요`],
+  ],
+};
 function HowTo() {
   return (0, S.jsx)(`div`, {
     className: `bb-howto`,
-    children: HOWTO.map(([k, v]) => (0, S.jsxs)(`div`, { children: [(0, S.jsx)(`b`, { children: k }), (0, S.jsx)(`span`, { children: v })] }, k)),
+    children: Object.entries(HOWTO).map(([title, rows]) =>
+      (0, S.jsxs)(
+        `section`,
+        {
+          children: [
+            (0, S.jsx)(`h4`, { children: title }),
+            ...rows.map(([k, v]) => (0, S.jsxs)(`div`, { children: [(0, S.jsx)(`b`, { children: k }), (0, S.jsx)(`span`, { children: v })] }, k)),
+          ],
+        },
+        title,
+      ),
+    ),
   });
 }
 var re = {
@@ -1975,6 +1998,7 @@ function ae({
       role: `dialog`,
       "aria-modal": `true`,
       "aria-label": `경기 중단 확인`,
+      ref: (el) => el && !el.contains(document.activeElement) && el.querySelector(`button`)?.focus(),
       children: (0, S.jsxs)(`div`, {
         className: `bb-pause-card`,
         children: [
@@ -2011,6 +2035,7 @@ function ae({
     role: `dialog`,
     "aria-modal": `true`,
     "aria-label": `일시정지 요약`,
+    ref: (el) => el && !el.contains(document.activeElement) && el.querySelector(`button`)?.focus(),
     children: (0, S.jsxs)(`div`, {
       className: `bb-pause-card`,
       children: [
@@ -2176,11 +2201,13 @@ function oe({ visible: e, onSelect: t, initStep }) {
   }, [e, initStep]);
   if (!e) return null;
   let btn = (label, onClick, cls = `bb-btn-playball`) => (0, S.jsx)(`button`, { className: `bb-btn ${cls}`, onClick, children: label }, label),
+    // 설명 한 줄이 붙은 버튼 (난이도·이닝)
+    dbtn = (label, desc, onClick, cls = `bb-btn-playball`) => (0, S.jsxs)(`button`, { className: `bb-btn bb-btn-desc ${cls}`, onClick, children: [label, (0, S.jsx)(`small`, { children: desc })] }, label),
     pick = (k, v) => {
       let c2 = { ...cfg, [k]: v };
       (setCfg(c2), k === `mode` ? setStep(`diff`) : k === `diff` ? setStep(c2.mode === `TGA` ? `tga` : `innings`) : t(c2));
     },
-    back = (to) => btn(`◀`, () => setStep(to), `bb-btn-home`),
+    back = (to) => btn(`◀ 뒤로`, () => setStep(to), `bb-btn-home`),
     body = {
       mode: [
         btn(`⚾ REAL MODE · 실전 경기`, () => setStep(`real`), `bb-btn-swing`),
@@ -2219,13 +2246,13 @@ function oe({ visible: e, onSelect: t, initStep }) {
         back(`mode`),
       ],
       diff: [
-        btn(`🟢 EASY`, () => pick(`diff`, `EASY`)),
-        ...(cfg.mode === `TGA` ? [btn(`🟡 SOSO`, () => pick(`diff`, `SOSO`), `bb-btn-swing`)] : []),
-        btn(`🔴 HARD`, () => pick(`diff`, `HARD`), `bb-btn-quit`),
+        dbtn(`🟢 EASY`, cfg.mode === `TGA` ? `2점 차 · 공 위치와 타이밍 원이 보여요` : `공이 느리고 들어올 위치가 보여요`, () => pick(`diff`, `EASY`)),
+        ...(cfg.mode === `TGA` ? [dbtn(`🟡 SOSO`, `4점 차 · 공 위치가 보여요`, () => pick(`diff`, `SOSO`), `bb-btn-swing`)] : []),
+        dbtn(`🔴 HARD`, cfg.mode === `TGA` ? `5점 차 · 빠른 공과 변화구` : `공이 빠르고 변화구가 섞여요 · 수비 송구도 빨라요`, () => pick(`diff`, `HARD`), `bb-btn-quit`),
         back(`real`),
       ],
       innings: [
-        (0, S.jsx)(`div`, { className: `bb-innings-pick`, children: [1, 3, 5, 9].map((n) => btn(`${n}이닝`, () => pick(`innings`, n))) }, `g`),
+        (0, S.jsx)(`div`, { className: `bb-innings-pick`, children: [1, 3, 5, 9].map((n) => dbtn(`${n}이닝`, `약 ${n * 5}분`, () => pick(`innings`, n))) }, `g`),
         back(`diff`),
       ],
       help: [(0, S.jsx)(HowTo, {}, `h`), back(`mode`)],
@@ -2251,6 +2278,7 @@ function oe({ visible: e, onSelect: t, initStep }) {
     role: `dialog`,
     "aria-modal": `true`,
     "aria-label": `메인 화면`,
+    ref: (el) => el && !el.contains(document.activeElement) && el.querySelector(`button`)?.focus(),
     children: (0, S.jsxs)(`div`, {
       className: `bb-pause-card bb-menu`,
       children: [(0, S.jsx)(`div`, { className: `bb-main-title`, children: `⚾ 베이스볼 전략 교실` }), ...body],
@@ -2373,7 +2401,7 @@ function ce() {
     let t = () => {
       let t = e.clientWidth,
         n = Math.max(window.innerHeight - k - 40, 300),
-        r = Math.min(t / se, n / O, 1.2);
+        r = Math.min(t / se, n / O, 2.2); // 프로젝터(1920×1080)에서 약 1.6배
       a(Math.max(0.35, r));
     };
     t();
@@ -2414,7 +2442,6 @@ function ce() {
         ref: r,
         style: {
           width: `100%`,
-          maxWidth: se,
           display: `flex`,
           justifyContent: `center`,
         },
