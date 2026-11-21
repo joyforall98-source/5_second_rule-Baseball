@@ -753,7 +753,7 @@ function b() {
         (e.isSwung = !0),
         (e.swingDisabled = !0),
         e.swingMiss
-          ? (e.strikes++, (e.statusText = `헛스윙 스트라이크!`))
+          ? (e.strikes++, (e.statusText = `헛스윙 스트라이크!`), (e.swingFeedback ||= { text: `STRIKE`, color: `#f1c40f` })) // 컴퓨터 타자 헛스윙도 STRIKE
           : e.pitchType === `strike`
             ? (e.strikes++,
               (e.statusText = `루킹 스트라이크!`),
@@ -1284,6 +1284,7 @@ function b() {
   let ye = (0, _.useCallback)(
     (cfg) => {
       if (cfg.mode === `DEMO`) return startDemo(cfg.card);
+      o.current.lastCfg = cfg;
       let t = o.current,
         tga = cfg.mode === `TGA`,
         team = (name, line = []) => ({ name, lineup: bbLineup(), batter: 1, runs: 0, line, h: 0, e: 0, b: 0 }),
@@ -1402,6 +1403,7 @@ function b() {
       playball: A,
       swing: pe,
       restartGame: me,
+      replay: () => (me(), ye(o.current.lastCfg)), // 끝 화면: 같은 모드·난이도·이닝으로 다시
       advanceRunner: ge,
       pauseGame: _e,
       resumeGame: ve,
@@ -1606,6 +1608,8 @@ function ee({
           teams[bat] && (0, S.jsx)(LineupCard, { team: teams[bat], current: s }),
           (0, S.jsxs)(`div`, {
             className: `bb-tv-diamond`,
+            role: `img`,
+            "aria-label": `주자: ${[1, 2, 3].filter((b) => n[b - 1]).map((b) => `${b}루`).join(`, `) || `없음`}`,
             children: [
               (0, S.jsx)(`div`, {
                 className: `bb-tv-base bb-tv-2b${n[1] ? ` active` : ``}`,
@@ -1620,7 +1624,8 @@ function ee({
           }),
           (0, S.jsxs)(`div`, {
             className: `bb-count-panel`,
-            "aria-label": `볼카운트 상황판`,
+            role: `img`,
+            "aria-label": `볼 ${a}, 스트라이크 ${i}, 아웃 ${o}`,
             children: [
               (0, S.jsx)(E, { label: `B`, count: a, max: 3, color: `#2ecc71` }),
               (0, S.jsx)(E, { label: `S`, count: i, max: 2, color: `#f1c40f` }),
@@ -1671,7 +1676,7 @@ function te({ text: e, color: t, visible: n }) {
       })
     : null;
 }
-function ne({ visible: e, onRestart: n, mode, endInfo, teams, innings, inning, half }) {
+function ne({ visible: e, onRestart: n, onReplay, mode, endInfo, teams, innings, inning, half }) {
   if (!e || !endInfo) return null;
   let w = endInfo.winner,
     title = mode === `2P` ? (w == null ? `무승부` : `${teams[w].name} 승리!`) : w === 1 ? (mode === `TGA` ? `미션 성공!` : `승리!`) : mode === `TGA` ? `미션 실패` : `패배`;
@@ -1681,7 +1686,13 @@ function ne({ visible: e, onRestart: n, mode, endInfo, teams, innings, inning, h
       (0, S.jsx)(`h2`, { children: title }),
       (0, S.jsx)(`p`, { className: `bb-end-score`, children: `${teams[0].name} ${endInfo.score[0]} : ${endInfo.score[1]} ${teams[1].name} · ${endInfo.reason}` }),
       (0, S.jsx)(LineScore, { teams, innings, inning, half, final: !0 }),
-      (0, S.jsx)(`button`, { className: `bb-btn bb-btn-restart`, onClick: n, children: `메인 화면으로` }),
+      (0, S.jsxs)(`div`, {
+        className: `bb-end-actions`,
+        children: [
+          (0, S.jsx)(`button`, { className: `bb-btn bb-btn-restart`, onClick: onReplay, children: `↻ 다시 한 판` }),
+          (0, S.jsx)(`button`, { className: `bb-btn bb-btn-home`, onClick: n, children: `메인 화면으로` }),
+        ],
+      }),
     ],
   });
 }
@@ -2011,7 +2022,7 @@ function ae({
       role: `dialog`,
       "aria-modal": `true`,
       "aria-label": `경기 중단 확인`,
-      ref: (el) => el && !el.contains(document.activeElement) && el.querySelector(`button`)?.focus(),
+      ref: (el) => el && !el.contains(document.activeElement) && el.querySelector(`.bb-btn-playball`)?.focus(),
       children: (0, S.jsxs)(`div`, {
         className: `bb-pause-card`,
         children: [
@@ -2215,7 +2226,7 @@ function oe({ visible: e, onSelect: t, initStep }) {
   if (!e) return null;
   let btn = (label, onClick, cls = `bb-btn-playball`) => (0, S.jsx)(`button`, { className: `bb-btn ${cls}`, onClick, children: label }, label),
     // 설명 한 줄이 붙은 버튼 (난이도·이닝)
-    dbtn = (label, desc, onClick, cls = `bb-btn-playball`) => (0, S.jsxs)(`button`, { className: `bb-btn bb-btn-desc ${cls}`, onClick, children: [label, (0, S.jsx)(`small`, { children: desc })] }, label),
+    dbtn = (label, desc, onClick, cls = `bb-btn-playball`) => (0, S.jsxs)(`button`, { className: `bb-btn bb-btn-desc ${cls}`, onClick, children: [label, ` `, (0, S.jsx)(`small`, { children: desc })] }, label),
     pick = (k, v) => {
       let c2 = { ...cfg, [k]: v };
       (setCfg(c2), k === `mode` ? setStep(`diff`) : k === `diff` ? setStep(c2.mode === `TGA` ? `tga` : `innings`) : t(c2));
@@ -2448,6 +2459,7 @@ function ce() {
       alignItems: `center`,
       justifyContent: `center`,
       padding: `12px`,
+      boxSizing: `border-box`, // 100vh 안에 padding 포함 (예전: 세로 24px 넘침)
       overflow: `hidden`,
     },
     children: [
@@ -2555,6 +2567,7 @@ function ce() {
               (0, S.jsx)(ne, {
                 visible: t.gameOver,
                 onRestart: n.restartGame,
+                onReplay: n.replay,
                 mode: t.mode,
                 endInfo: t.endInfo,
                 teams: t.teams,
